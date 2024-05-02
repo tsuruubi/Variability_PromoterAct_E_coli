@@ -1,0 +1,883 @@
+---
+title: "RMFmodel"
+output: html_document
+date: "2022-08-04"
+---
+# 0. General Settings
+## 0.1. Workspace
+### Load workspace
+```{r workspace_load,warning=FALSE, message=FALSE}
+# load("./RMF.RData")
+```
+### Save workspace
+```{r workspace_save,warning=FALSE, message=FALSE}
+# save.image("./RMF.RData")
+```
+## 0.2. Library loading
+```{r library,warning=FALSE, message=FALSE}
+library(viridis)
+library(ggplot2)
+library(GGally)
+library(scales)
+library(ggpubr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(dplyr)
+library(matrixStats)
+library(preprocessCore)
+library(RColorBrewer)
+library(openxlsx)
+library(ggsci)
+library(cowplot)
+library(corrplot)
+library(Hmisc)
+# https://stackoverflow.com/questions/59419647/hmisc-package-or-namespace-failed-to-load-no-package-called-latticeextra
+library(corrplot)
+library(tidyverse)
+library(magrittr)
+library(dendextend)
+library(FactoMineR)
+library(factoextra)
+library(proxy)
+library(rstatix)
+# library(plot3D)
+# library(clusterProfiler)
+# library(pathview)
+# library(org.EcK12.eg.db)
+# library(rvest)
+# library(corrr)
+# library(GOSemSim)
+# library(rrvgo)
+# library(qdapTools)
+# library(AnnotationDbi)
+# library(ggVennDiagram)
+# library(rJava)
+# library(venneuler)
+library(gtools)
+library(parallel)
+```
+## 0.3. versatile user functions
+The [qw](https://ja.coder.work/so/r/240447) function in Perl.  
+The [createEmptyDf](https://htsuda.net/archives/2560) function.
+The [g_legend](https://github.com/hadley/ggplot2/wiki/Share-a-legend-between-two-ggplot2-graphs) function to extract legend.
+```{r functions}
+qw <- function(...) {
+  sapply(match.call()[-1], deparse)
+}
+
+createEmptyDf = function( nrow, ncol, colnames = c() ){
+  data.frame( matrix( vector(), nrow, ncol, dimnames = list( c(), colnames ) ) )
+}
+
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)}
+
+pValue_sp_text=function(dtf){
+  pcor_sp<-cor.test(x=dtf[,1],y=dtf[,2],method="spearman")
+  rho_sp<-round(pcor_sp$estimate,digits = 2)
+  pv_sp<-ifelse(pcor_sp$p.value<0.05," P<0.05",paste(" P==",round(pcor_sp$p.value,digits = 1),sep = ""))
+  rhopvtxt_sp<-paste("list(italic(rho)==", rho_sp,", ",pv_sp,")")
+  return(rhopvtxt_sp)
+}
+
+pValue_pr_text=function(dtf){
+  pcor_pr<-cor.test(x=dtf[,1],y=dtf[,2],method="pearson")
+  r_pr<-round(pcor_pr$estimate,digits = 2)
+  pv_pr<-ifelse(pcor_pr$p.value<0.05," P<0.05",paste(" P==",round(pcor_pr$p.value,digits = 1),sep = ""))
+  rpvtxt_pr<-paste("list(italic(r)==", r_pr,", ",pv_pr,")")
+  return(rpvtxt_pr)
+}
+```
+
+## create a binary matrix
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+N<-10 # number of genetic sites
+c<-1
+gt_lst<-permutations(2,N,v=c(0,1),repeats.allowed=TRUE)
+head(gt_lst)
+length(unique(do.call(paste,c(as.data.frame(gt_lst),sep="_"))))
+```
+## 0.4. user functions
+### 0.4.1. calculation of hamming distance
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+hmd<-function(x,y){
+  x1<-matrix(rep(x,each=nrow(y)),ncol=ncol(y))
+  y1<-abs(y-x1)
+  y_out<-rowSums(y1)
+  return(y_out)
+}
+temp<-floor(runif(N,0,2))
+hmd(temp,gt_lst)
+```
+### 0.4.2. calculate mutation effect
+calculate mean expression level of mutants whose genotypes are defferent by single mutations from wild type
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=1,fig.width=1,dpi=300}
+mut_effect<-function(gt_lst,expression){
+  xout<-list()
+  z<-list()
+  for(i in 1:nrow(gt_lst)){
+    x<-hmd(gt_lst[i,],gt_lst)
+    y1<-expression[which(x==1)]
+    y2<-expression[which(x==1)]-expression[i]
+    xout[[i]]<-mean(y2,na.rm=T)
+    z[[i]]<-paste(sum(sign(y2)>0),sum(sign(y2)==0),sum(sign(y2)<0),sep=",")
+    # z[[i]]<-ifelse(sum(sign(y2))==length(y2),"sink",ifelse(sum(sign(y2))==-length(y2),"peak","composite"))
+  }
+  xout<-unlist(xout)
+  zout<-unlist(z)
+  return(list(xout,zout))
+}
+
+uphill_ratio<-function(array){
+  x_out<-list()
+  for(ii in 1:length(array)){
+    x<-as.numeric(str_split(array[ii],",")[[1]])
+    x_out[[ii]]<-x[1]/sum(x)
+  }
+  return(unlist(x_out))
+}
+
+# temp<-RMF_exlandscape_list[[2]]
+# ggscatter(temp,x="hmdist",y="expression",size=0.3,alpha=0.1)
+# i<-1
+# 
+# temp$expression[which(hmd(gt_lst[i,],gt_lst)==1)]
+# temp$expression[which(hmd(gt_lst[i,],gt_lst)==0)]
+# temp1<-temp$expression[which(hmd(gt_lst[i,],gt_lst)==1)]-temp$expression[which(hmd(gt_lst[i,],gt_lst)==0)]
+# mut_effect(gt_lst,temp$expression)
+```
+
+# 1. Expression landscape 
+create expression landscape
+## 1.1. RMF
+https://github.com/song88180/fitness-landscape-error/blob/master/1_Generate_Fitness_Landscape/RMF_model_generation.ipynb
+https://colorate.azurewebsites.net/ja
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+Nland<-10
+std<-1 # 0.3 for modified RMF
+RMF_exlandscape<-function(gt_lst,std,Nland){
+  x<-gt_lst
+  y<-Nland
+  xout<-list()
+  for (i in 1:y){
+    wt<-floor(runif(N,0,2))
+    hmdz<-hmd(wt,x)
+    z <- -c*hmdz+rnorm(2^N, mean=0, sd=std) # Normal RMF
+    # z <- -c*hmdz+rnorm(2^N, mean=0, sd=std*hmdz^0.6) #<-------------------------- modified RMF
+    z1<-min(z)
+    z2<-max(z)
+    z <-(z-z1)/(z2-z1)
+    x_max<-x[which(z==max(z)),]
+    hmdz_norm<-hmd(x_max,x)
+    me<-mut_effect(x,z)
+    z<-data.frame(genotype=do.call(paste,c(as.data.frame(x),sep="_")),expression=z,muteffect=me[[1]],shape=me[[2]],hmdist=hmdz_norm)
+    z$genotype<-as.character(z$genotype)
+    xout[[i]]<-z
+    
+  }
+  return(xout)
+}
+
+c=1
+RMF_exlandscape_list<-RMF_exlandscape(gt_lst,std,Nland)
+
+temp1<-RMF_exlandscape_list[[4]]
+temp1$uphillratio<-uphill_ratio(temp1$shape)
+ggscatter(temp1,x="hmdist",y="expression",color="uphillratio",alpha=0.5,size=2,
+          xlab="Hamming distance from the fittest",ylab="Expression level",legend.title="")+
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+
+ggscatter(temp1,x="expression",y="muteffect",color="uphillratio",alpha=0.5,size=2,
+          xlab="Expression level",ylab="Mutational effects",legend.title="")+
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5)
+```
+## 1.2. modified NK model
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+imatrix_rand<-function(N,K){
+  Int_matrix_rand<-matrix(0,N,N)
+  for(aa1 in 1:N){
+    Indexes_1<-seq(1,N)
+    Indexes_1[aa1]<-NA
+    Indexes_1<-Indexes_1[!is.na(Indexes_1)]
+    Indexes_1<-c(sample(Indexes_1),aa1)
+    Chosen_ones<-Indexes_1[c(N-(K)):N]   # this takes the last K+1 indexes
+    for(aa2 in Chosen_ones){
+      Int_matrix_rand[aa1,aa2]<-1 # we turn on the interactions with K other variables
+    }
+  }
+  return(Int_matrix_rand)
+}
+
+calc_fit<-function(NK_land_, inter_m, Current_position, Power_key_){
+  # Fit_vector<-matrix(0,nrow = N,ncol=1)
+  Fit_vector<-rep(0,N)
+  for(ad1 in 1:N){
+    Fit_vector[ad1]<-NK_land_[1+sum(Current_position*inter_m[ad1,]*Power_key_),ad1]
+  }
+  return(Fit_vector)
+}
+
+comb_and_values<-function(gt_lst,NK_land_,Power_key_,inter_m){
+  Comb_and_value<-matrix(0,nrow=2^N,ncol = N+1)
+  c1<-1
+  pmt<-gt_lst
+  for(c2 in 1:nrow(pmt)){
+    Combination1<-pmt[c2,]
+    fit_1<-calc_fit(NK_land_,inter_m,Combination1,Power_key_)
+    Comb_and_value[c1,1:N]<-Combination1
+    Comb_and_value[c1,N+1]<-mean(fit_1)
+    c1<-c1+1
+  }
+  return(Comb_and_value)
+}
+
+normalize_nk<-function(array){
+  max_nk<-max(array)
+  min_nk<-min(array)
+  return((array-min_nk)/(max_nk-min_nk))
+}
+
+modify_nk<-function(array){
+  # array<-abs(array-0.5)
+  array<-array-0.5
+  array[array<0]<-0
+  return(normalize_nk(array))
+}
+
+NK_exlandscape<-function(gt_lst,Nland,modify=TRUE){
+  Power_key<-2^rev(seq(0,N-1))
+  xout<-list()
+  for(ii in 1:Nland){
+    Int_matrix<-imatrix_rand(N,K)
+    NK_land<-matrix(runif((2^N)*N),ncol=N)
+    x<-comb_and_values(gt_lst,NK_land, Power_key, Int_matrix)
+    x<-data.frame(genotype=do.call(paste,c(as.data.frame(x[,1:N]),sep="_")),expression=x[,N+1])
+    x$genotype<-as.character(x$genotype)
+    x$expression<-normalize_nk(x$expression)
+    if(modify){
+      x$expression<-modify_nk(x$expression)
+    }
+    gt_max<-gt_lst[which(x$expression==max(x$expression)),]
+    x$hmdist<-hmd(gt_max,gt_lst)
+    y<-mut_effect(gt_lst,x$expression)
+    x$muteffect<-y[[1]]
+    x$shape<-y[[2]]
+    xout[[ii]]<-x
+  }
+  return(xout)
+}
+# library(paletteer)
+# library(ggthemes)
+
+# https://r-charts.com/color-palettes/
+
+N<-10
+K<-3
+Nland<-10
+NK_exlandscape_lst<-NK_exlandscape(gt_lst,Nland,modify=FALSE)
+temp1<-NK_exlandscape_lst[[1]]
+temp1$uphillratio<-uphill_ratio(temp1$shape)
+ggscatter(temp1,x="expression",y="muteffect",color="uphillratio",alpha=0.5,size=2,
+          xlab="expression level",ylab="mutation effect",legend.title="")+
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+
+ggscatter(temp1,x="hmdist",y="expression",color="uphillratio",alpha=0.5,size=2,
+          xlab="Hamming distance from the fittest",ylab="mutation effect",legend.title="")+
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+
+# ggscatter(temp,x="hmdist",y="expression",alpha=0.5,color="shape",size=0.5)
+```
+## 1.3. generate initial genotypes whose expression levels are at the middle levels 
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+exlevel<-0.3
+initial_genotypes<-function(gt_lst,exlandscape_list,exlevel){
+  xout<-list()
+  for(ii in 1:length(exlandscape_list)){
+    x<-exlandscape_list[[ii]]
+    xout[[ii]]<-x[x$expression>exlevel,]$genotype
+  }
+  return(xout)
+}
+temp<-initial_genotypes(gt_lst,RMF_exlandscape_list,exlevel)
+sample(x=temp[[1]],size=10)
+```
+
+# 2. Fitness landscape
+create fitness landscape
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+fitlandscape<-function(RMF_exlandscape_list,intrcpt){
+  k<-1
+  x<-list()
+  y<-intrcpt
+  z<-RMF_exlandscape_list
+  for(i in 1:length(y)){
+    for(j in 1:length(z)){
+      xi<-z[[j]]
+      xi$intercept<-y[i]
+      xi$fitness<-(1-y[i])*xi$expression+y[i]
+      x[[k]]<-xi
+      k<-k+1
+    }
+  }
+  return(x)
+}
+intrcpt<-c(0.3,0.5,0.99)
+RMF_landscape_list<-fitlandscape(RMF_exlandscape_list,intrcpt)
+head(RMF_landscape_list[[1]])
+```
+# 3. Mutation matrix 
+## 3.1. parameters
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+# n = len(next(iter(fitness)))
+mu <- 0.001#1e-4 # mutation rate as in Szendro et al. 2013 
+m <- nrow(gt_lst) # Number of genotypes
+```
+## 3.2. create Mutation matrix
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=1,fig.width=1,dpi=300}
+mutation_matrix<-function(genotypes, mu){
+    m <- nrow(genotypes)
+    M <- diag(1.0, m)
+    for(i in 1:m){
+      g1<-hmd(genotypes[i,],genotypes)
+      M[which(g1==1),i]<-mu
+      M[i,i]<-M[i,i]-length(which(g1==1))*mu
+    }
+    return(M)
+}
+M<-mutation_matrix(gt_lst,mu)
+l<-ifelse(nrow(M)>32,32,nrow(M))
+corrplot(M[1:l,1:l],cl.lim=c(0,1), is.corr = FALSE,tl.cex = 0.3,cl.cex = 0.3,mar=c(1,0,1,0),tl.col = "black", method = "color")
+```
+# 4. Selection matrix
+## 4.1. create Selection matrix
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=1,fig.width=1,dpi=300}
+selection_matrix<-function(fitness){
+    return(diag(fitness, length(fitness)))
+}
+S<-selection_matrix(RMF_landscape_list[[1]]$fitness)
+l<-ifelse(nrow(S)>32,32,nrow(S))
+corrplot(S[1:l,1:l],cl.lim=c(0,1), is.corr = FALSE,tl.cex = 0.3,cl.cex = 0.3,mar=c(1,0,1,0),tl.col = "black", method = "color")
+```
+## 4.2. create single matrix for mutation and the linear part of selection
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=1,fig.width=1,dpi=300}
+E<-M %*% S 
+l<-ifelse(nrow(E)>32,32,nrow(E))
+corrplot(E[1:l,1:l],cl.lim=c(0,1), is.corr = FALSE,tl.cex = 0.3,cl.cex = 0.3,mar=c(1,0,1,0),tl.col = "black", method = "color")
+```
+# 5. Simulate evolution (RMF)
+## 5.1. adaptation (RMF)
+create a function to simulate evolution based on a given landscape
+```{r RMF,warning=FALSE, message=FALSE,fig.height=2,fig.width=2,dpi=300}
+Npop<-1e9
+generations<-50 # 2^12
+intrcpt<-c(0.1,0.4,0.7)
+N<-5 # number of genetic sites
+c<-1
+std<-2
+Nland<-10
+gt_lst<-permutations(2,N,v=c(0,1),repeats.allowed=TRUE)
+RMF_exlandscape_list<-RMF_exlandscape(gt_lst,std,Nland)
+RMF_landscape_list<-fitlandscape(RMF_exlandscape_list,intrcpt)
+
+landscape_list<-RMF_landscape_list[[12]]
+# gstart<-landscape_list$genotype[which(landscape_list$fitness==min(landscape_list$fitness))] # activate when using maladaptive genotype
+gstart<-paste(floor(runif(N,0,2)),collapse="_") # activate when using maladaptive genotype
+gend<-landscape_list$genotype[which(landscape_list$fitness==max(landscape_list$fitness))]
+mu <- 0.0001#1e-4 # mutation rate as in Szendro et al. 2013 
+m <- nrow(gt_lst) # of genotypes
+M<-mutation_matrix(gt_lst,mu)
+S<-selection_matrix(landscape_list$fitness)
+E<-M %*% S
+
+# gstart<-paste(c(0,0,0,0,1),collapse = "_")
+# gend<-paste(c(1,1,1,1,1),collapse = "_")
+adaptation<-function(landscape_list,gstart,gend,verbose){
+  g0i<-which(landscape_list$genotype==gstart)
+  if(verbose){
+    print(paste("starting genotype:", landscape_list$genotype[g0i]))
+    print(paste("starting fitness:", landscape_list$fitness[g0i]))
+  }
+  g1i<-which(landscape_list$genotype==gend)
+  
+  #p is the frequencies vector
+  p<-matrix(NA, nrow = nrow(landscape_list), ncol = generations)
+  p[,1]<-0
+  p[g0i,1]<-1.0
+  
+  # pom holds the index of the most frequent genotype at each time point
+  pom<-matrix(NA, nrow = nrow(landscape_list), ncol = 1)
+  pom[1]<-which(p[,1]==max(p[,1]))
+  
+  # W holds the population mean fitness at each time point
+  W <- matrix(NA, nrow = generations, ncol = 1)
+  W[1] = diag(S) %*% p[,1]  # mean fitness calculation
+  
+  for (k in 2:generations){
+    if((verbose)&(k %% c(1000) == 0)){
+      print(k, end=" ")
+    }
+    p[,k] <- E %*% p[, k - 1]  # selection and mutation are deterministic
+    p[,k] <- p[, k]/sum(p[,k])  # normalize frequencies vector
+    p[,k] <- unlist(lapply(p[,k],rbinom,n=1,size =Npop))/Npop  # random genetic drift is stochastic
+
+    W[k] <- diag(S) %*% p[,k]   # mean fitness calculation
+    pom[k]<-which(p[,k]==max(p[,k]))
+    
+    # break if reached fixation
+    if(p[g1i,k] > 0.99){ #<---------------------------should be adjusted according to mu
+        break
+    }
+  }
+  # return(list(k, p, W,pom[k]))
+  return(pom[k])
+}
+
+
+res <- adaptation(landscape_list,gstart,gend,verbose=FALSE)
+# landscape_list$expression[[res[[4]]]]
+# landscape_list$muteffect[[res[[4]]]]
+# landscape_list$shape[[res[[4]]]]
+
+```
+
+## 5.2. Simulation of evolution based on the RMF model
+Simulate evolution for various landscapes and calc. mutational effect
+```{r RMF,warning=FALSE, message=FALSE,fig.height=2,fig.width=2,dpi=300}
+Npop<-1e5
+generations<-30 # 2^12
+intrcpt<-c(0.3,0.5,0.99)
+N<-10 # number of genetic sites
+c<-1 # 1 for RMF, 0 for HoC 
+std<-1 # 0.3 for modified RMF, 1 for RMF
+Nland<-10
+mu <- 0.001#1e-4 # mutation rate as in Szendro et al. 2013 
+exlevel<--0.1
+# Nini<-100 # activate if start from random genotypes
+
+gt_lst<-permutations(2,N,v=c(0,1),repeats.allowed=TRUE)
+m <- nrow(gt_lst) # of genotypes
+RMF_exlandscape_list<-RMF_exlandscape(gt_lst,std,Nland)
+RMF_landscape_list<-fitlandscape(RMF_exlandscape_list,intrcpt)
+M<-mutation_matrix(gt_lst,mu)
+
+gt_initials<-initial_genotypes(gt_lst,RMF_exlandscape_list,exlevel)
+gstart_lst<-list()
+for(i in 1:length(gt_initials)){
+  temp<-gt_initials[[i]]
+  Nini<-min(c(length(temp),600))
+  gstart_lst[[i]]<-sample(x=temp,size=Nini)
+}
+
+for (i in 1:length(RMF_landscape_list)){
+  landscape_list<-RMF_landscape_list[[i]]
+  gend<-landscape_list$genotype[which(landscape_list$fitness==max(landscape_list$fitness))]
+  S<-selection_matrix(landscape_list$fitness)
+  E<-M %*% S
+  l<-ifelse(i%%Nland==0,Nland,i%%Nland)
+  gstart<-gstart_lst[[l]]
+  res<-mclapply(gstart,adaptation,landscape_list = landscape_list,gend = gend,verbose=FALSE)
+  res<-unlist(res)
+  temp<-createEmptyDf(nrow=length(res),ncol=4,colnames=qw(intrcpt,expression,muteffect,shape))
+  temp$intrcpt<-landscape_list$intercept[1]
+  temp$expression<-landscape_list$expression[res]
+  temp$muteffect<-landscape_list$muteffect[res]
+  temp$shape<-landscape_list$shape[res]
+  if(i==1){
+    dMutEffect<-temp
+  }else{
+    dMutEffect<-rbind(dMutEffect,temp)
+  }
+  print(i)
+}
+```
+
+
+
+
+## 5.3. Visualization
+### 5.3.1.
+```{r RMF,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=9.6,dpi=300}
+dMutEffect$intrcpt<-factor(dMutEffect$intrcpt,levels=intrcpt)
+temp<-get_palette("lancet",2)
+temp<-c(temp[c(2,1)],"gray40")
+myslope<--1
+myintercept<-0.5
+ggscatter(dMutEffect,x="expression",y="muteffect",color = "intrcpt",alpha=0.2,size=0.2)
+
+temp0<-dMutEffect
+tempx<-list()
+figlist<-list()
+for(i in 1:length(intrcpt)){
+  tempx[[i]]<-temp0[temp0$intrcpt==intrcpt[i],]
+  tempx[[i]]<-tempx[[i]][order(tempx[[i]]$expression),]
+  tempx[[i]]$Runmed<-runmed(tempx[[i]]$muteffect,101)
+  g<-ggscatter(tempx[[i]],x="expression",y="muteffect",color = temp[i],alpha=0.1,size=0.2,xlim=c(0,1),ylim=c(-0.4,0.4),
+               xlab="Expression level [a.u.]", ylab="Mutational effect [a.u.]")+
+    scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+    geom_line(aes(x=expression,y=Runmed),color = temp[i])+
+    annotate("text",x=Inf,y=Inf,label=paste("Fb=",intrcpt[i],sep=" "), hjust = 1,vjust = 1,size=7)
+  g<-ggpar(g,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+  # g<-g+geom_abline(slope = myslope,intercept = myintercept,size=0.2)+geom_vline(xintercept = c(0.5,0.75),size=0.2)
+  figlist[[i]]<-g
+}
+grid.arrange(figlist[[1]], figlist[[2]], figlist[[3]], nrow = 1)
+
+for(i in 1:length(intrcpt)){
+  if(i==1){
+    dfrunmed<-tempx[[i]]
+  }else{
+    dfrunmed<-rbind(dfrunmed,tempx[[i]])
+  }
+}
+
+```
+### 5.3.2.
+```{r RMF,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=9.6,dpi=300}
+temp1<-RMF_exlandscape_list[[1]]
+temp1$uphillratio<-uphill_ratio(temp1$shape)
+
+g1<-ggscatter(temp1,x="hmdist",y="expression",color="uphillratio",alpha=0.5,size=2,
+          xlab="Hamming distance",ylab="Expression level [a.u]",legend="")+
+    scale_x_continuous(breaks = get_breaks(by = 2, from = 0),limits =  c(0, 10)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+g1<-ggpar(g1,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+temp3<-RMF_landscape_list[[1]]
+temp3$uphillratio<-uphill_ratio(temp3$shape)
+g2<-ggscatter(temp3,x="hmdist",y="fitness",color="uphillratio",alpha=0.5,size=2,ylim=c(0,1),
+          xlab="Hamming distance",ylab="Fitness [a.u]",legend="")+
+  geom_hline(yintercept = intrcpt[1],color=temp[1])+
+  scale_x_continuous(breaks = get_breaks(by = 2, from = 0),limits =  c(0, 10)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = 0),limits =  c(0, 1)) +
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+g2<-ggpar(g2,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+g3<-ggscatter(temp1,x="expression",y="muteffect",color="uphillratio",alpha=0.5,size=2,
+          xlab="Expression level [a.u.]",ylab="Mutational effect [a.u.]",legend="",xlim=c(0,1),ylim=c(-0.4,0.4))+
+          scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+          scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+g3<-ggpar(g3,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+grid.arrange(g1,g3,g2, nrow = 1)
+
+p_led<-ggscatter(temp1,x="expression",y="muteffect",color="uphillratio",alpha=0.5,size=2,
+          xlab="Expression level [a.u.]",ylab="Mutational effect [a.u.]",legend="right",legend.title="",xlim=c(0,1),ylim=c(-0.4,0.4))+
+          scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+          scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1),breaks=c(0,0.5,1))
+q<-ggpar(p_led,font.legend = 16)
+leg <- get_legend(q)
+as_ggplot(leg)
+```
+### 5.3.3.
+```{r RMF,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=3.2,dpi=300}
+temp2<-data.frame(expression=rep(c(0,1),length(intrcpt)),intrcpt=rep(intrcpt,each=2))
+temp2$fitness<-(1-temp2$intrcpt)*temp2$expression+temp2$intrcpt
+temp2$intrcpt<-factor(temp2$intrcpt,levels=intrcpt)
+g4<-ggline(temp2,x="expression",y="fitness",color="intrcpt",palette=temp,
+       numeric.x.axis = TRUE,plot_type="l",xlim=c(0,1),ylim=c(0,1),
+           xlab="Expression level [a.u.]", ylab="Fitness [a.u.]",legend="")+
+  scale_x_continuous(breaks = get_breaks(by = 0.2, from = 0),limits =  c(0, 1)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = 0),limits =  c(0, 1))
+
+g5<-ggline(dfrunmed,x="expression",y="Runmed",color = "intrcpt",palette = temp,
+           numeric.x.axis = TRUE,plot_type="l",xlim=c(0,1),ylim=c(-0.4,0.4),
+           xlab="Expression level [a.u.]", ylab="Mutational effect [a.u.]",legend="")+
+  scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.4),limits =  c(-0.4, 0.4))
+g5<-ggpar(g5,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+# g1<-g1+geom_abline(slope = myslope,intercept = myintercept,size=0.2)
+g5.1<-ggline(dfrunmed,x="expression",y="Runmed",color = "intrcpt",palette = temp,
+           numeric.x.axis = TRUE,plot_type="l",xlim=c(0.6,0.8),ylim=c(-0.2,0),
+           xlab="Expression level [a.u.]", ylab="Mutational effect [a.u.]")
+g5
+```
+## 5.4. Output
+```{r RMF,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=3.2,dpi=300}
+# expression landscape
+for(i in 1:length(RMF_exlandscape_list)){
+  my_tmp<-RMF_exlandscape_list[[i]]
+  my_tmp$ID<-i
+  if(i==1){
+    my_df<-my_tmp
+  }else{
+    my_df<-bind_rows(my_df,my_tmp)
+  }
+}
+my_df<-my_df %>% select(ID,everything())
+write_csv(my_df,file = paste(getwd(),"Output","ExprsLandscape_RMF.csv",sep = "/"))
+
+# fitness landscape
+my_ids<-rep(seq(1,length(RMF_exlandscape_list)),each=length(intrcpt))
+for(i in 1:length(RMF_landscape_list)){
+  my_tmp<-RMF_landscape_list[[i]]
+  my_tmp$ID<-my_ids[i]
+  if(i==1){
+    my_df<-my_tmp
+  }else{
+    my_df<-bind_rows(my_df,my_tmp)
+  }
+}
+my_df<-my_df %>% select(ID,everything())
+write_csv(my_df,file = paste(getwd(),"Output","FitnessLandscape_RMF.csv",sep = "/"))
+
+# mutational effect
+write_csv(dMutEffect,file = paste(getwd(),"Output","MutEffect_RMF.csv",sep = "/"))
+```
+# 6. Simulate evolution (modified NK)
+## 6.1. adaptation (modified NK)
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=2,fig.width=2,dpi=300}
+Npop<-1e9
+generations<-30 # 2^12
+intrcpt<-c(0.3,0.5,0.99)
+N<-10 # number of genetic sites
+# c<-1
+# std<-2
+Nland<-10
+K<-5
+gt_lst<-permutations(2,N,v=c(0,1),repeats.allowed=TRUE)
+NK_exlandscape_list<-NK_exlandscape(gt_lst,Nland,modify=FALSE)
+NK_landscape_list<-fitlandscape(NK_exlandscape_list,intrcpt)
+
+landscape_list<-NK_landscape_list[[12]]
+# gstart<-landscape_list$genotype[which(landscape_list$fitness==min(landscape_list$fitness))] # activate when using maladaptive genotype
+gstart<-paste(floor(runif(N,0,2)),collapse="_") # activate when using maladaptive genotype
+gend<-landscape_list$genotype[which(landscape_list$fitness==max(landscape_list$fitness))]
+mu <- 0.0001#1e-4 # mutation rate as in Szendro et al. 2013 
+m <- nrow(gt_lst) # of genotypes
+M<-mutation_matrix(gt_lst,mu)
+S<-selection_matrix(landscape_list$fitness)
+E<-M %*% S
+
+# gstart<-paste(c(0,0,0,0,1),collapse = "_")
+# gend<-paste(c(1,1,1,1,1),collapse = "_")
+adaptation<-function(landscape_list,gstart,gend,verbose){
+  g0i<-which(landscape_list$genotype==gstart)
+  if(verbose){
+    print(paste("starting genotype:", landscape_list$genotype[g0i]))
+    print(paste("starting fitness:", landscape_list$fitness[g0i]))
+  }
+  g1i<-which(landscape_list$genotype==gend)
+  
+  #p is the frequencies vector
+  p<-matrix(NA, nrow = nrow(landscape_list), ncol = generations)
+  p[,1]<-0
+  p[g0i,1]<-1.0
+  
+  # pom holds the index of the most frequent genotype at each time point
+  pom<-matrix(NA, nrow = nrow(landscape_list), ncol = 1)
+  pom[1]<-which(p[,1]==max(p[,1]))
+  
+  # W holds the population mean fitness at each time point
+  W <- matrix(NA, nrow = generations, ncol = 1)
+  W[1] = diag(S) %*% p[,1]  # mean fitness calculation
+  
+  for (kk in 2:generations){
+    if((verbose)&(kk %% c(1000) == 0)){
+      print(kk, end=" ")
+    }
+    p[,kk] <- E %*% p[, kk - 1]  # selection and mutation are deterministic
+    p[,kk] <- p[, kk]/sum(p[,kk])  # normalize frequencies vector
+    p[,kk] <- unlist(lapply(p[,kk],rbinom,n=1,size =Npop))/Npop  # random genetic drift is stochastic
+
+    W[kk] <- diag(S) %*% p[,kk]   # mean fitness calculation
+    pom[kk]<-which(p[,kk]==max(p[,kk]))
+    
+    # break if reached fixation
+    if(max(p[g1i,kk]) > 0.99){ #<---------------------------should be adjusted according to mu
+        break
+    }
+  }
+  # return(list(kk, p, W,pom[kk]))
+  return(pom[kk])
+}
+
+```
+
+## 6.2. simulation of evolution base on the NK model
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=2,fig.width=2,dpi=300}
+Npop<-1e5
+generations<-30 # 2^12
+intrcpt<-c(0.3,0.5,0.99)
+N<-10 # number of genetic sites
+K<-3
+Nland<-10
+mu <- 0.001#1e-4 # mutation rate as in Szendro et al. 2013 
+exlevel<--0.1
+# Nini<-100 # activate if start from random genotypes
+
+gt_lst<-permutations(2,N,v=c(0,1),repeats.allowed=TRUE)
+m <- nrow(gt_lst) # of genotypes
+NK_exlandscape_list<-NK_exlandscape(gt_lst,Nland,modify=FALSE)
+NK_landscape_list<-fitlandscape(NK_exlandscape_list,intrcpt)
+M<-mutation_matrix(gt_lst,mu)
+
+gt_initials<-initial_genotypes(gt_lst,NK_exlandscape_list,exlevel)
+gstart_lst<-list()
+for(i in 1:length(gt_initials)){
+  temp<-gt_initials[[i]]
+  Nini<-min(c(length(temp),600))
+  gstart_lst[[i]]<-sample(x=temp,size=Nini)
+}
+
+for (i in 1:length(NK_landscape_list)){
+  landscape_list<-NK_landscape_list[[i]]
+  gend<-landscape_list$genotype[which(landscape_list$fitness==max(landscape_list$fitness))]
+  S<-selection_matrix(landscape_list$fitness)
+  E<-M %*% S
+  l<-ifelse(i%%Nland==0,Nland,i%%Nland)
+  gstart<-gstart_lst[[l]]
+  res<-mclapply(gstart,adaptation,landscape_list = landscape_list,gend = gend,verbose=FALSE)
+  res<-unlist(res)
+  temp<-createEmptyDf(nrow=length(res),ncol=4,colnames=qw(intrcpt,expression,muteffect,shape))
+  temp$intrcpt<-landscape_list$intercept[1]
+  temp$expression<-landscape_list$expression[res]
+  temp$muteffect<-landscape_list$muteffect[res]
+  temp$shape<-landscape_list$shape[res]
+  if(i==1){
+    dMutEffect_nk<-temp
+  }else{
+    dMutEffect_nk<-rbind(dMutEffect_nk,temp)
+  }
+  print(i)
+}
+```
+
+## 6.3. Visualization
+### 6.3.1. 
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=9.6,dpi=300}
+dMutEffect_nk$intrcpt<-factor(dMutEffect_nk$intrcpt,levels=intrcpt)
+temp<-get_palette("lancet",2)
+temp<-c(temp[c(2,1)],"gray40")
+myslope<--1
+myintercept<-0.5
+ggscatter(dMutEffect_nk,x="expression",y="muteffect",color = "intrcpt",alpha=0.2,size=0.2)
+
+temp0<-dMutEffect_nk
+tempx<-list()
+figlist<-list()
+for(i in 1:length(intrcpt)){
+  tempx[[i]]<-temp0[temp0$intrcpt==intrcpt[i],]
+  tempx[[i]]<-tempx[[i]][order(tempx[[i]]$expression),]
+  tempx[[i]]$Runmed<-runmed(tempx[[i]]$muteffect,101)
+  g<-ggscatter(tempx[[i]],x="expression",y="muteffect",color = temp[i],alpha=0.1,size=0.2,xlim=c(0,1),ylim=c(-0.3,0.3),
+               xlab="Expression level [a.u.]", ylab="Mutational effect [a.u.]")+
+    scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+    geom_line(aes(x=expression,y=Runmed),color = temp[i])+
+    annotate("text",x=Inf,y=Inf,label=paste("Fb=",intrcpt[i],sep=" "), hjust = 1,vjust = 1,size=7)
+  g<-ggpar(g,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+  # g<-g+geom_abline(slope = myslope,intercept = myintercept,size=0.2)+geom_vline(xintercept = c(0.5,0.75),size=0.2)
+  figlist[[i]]<-g
+}
+grid.arrange(figlist[[1]], figlist[[2]], figlist[[3]], nrow = 1)
+
+for(i in 1:length(intrcpt)){
+  if(i==1){
+    dfrunmed_nk<-tempx[[i]]
+  }else{
+    dfrunmed_nk<-rbind(dfrunmed_nk,tempx[[i]])
+  }
+}
+
+```
+### 6.3.2. Running median
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=3.2,dpi=300}
+temp1<-NK_exlandscape_list[[1]]
+temp1$uphillratio<-uphill_ratio(temp1$shape)
+g0<-ggscatter(temp1,x="expression",y="muteffect",color="uphillratio",alpha=0.6,size=1,
+          xlab="Expression level [a.u.]",ylab="Mutation effects [a.u.]",legend.title="",xlim=c(0,1),ylim=c(-0.3,0.3))+
+          scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5)
+# g0<-g0+geom_abline(slope = myslope,intercept = myintercept,size=0.2)+geom_vline(xintercept = c(0.5,0.75),size=0.2)
+g1<-ggline(dfrunmed_nk,x="expression",y="Runmed",color = "intrcpt",palette = temp,
+           numeric.x.axis = TRUE,plot_type="l",xlim=c(0,1),ylim=c(-0.3,0.3),
+           xlab="Expression level [a.u.]", ylab="Mutational effects [a.u.]",legend.title="")
+# g1<-g1+geom_abline(slope = myslope,intercept = myintercept,size=0.2)
+g1.1<-ggline(dfrunmed_nk,x="expression",y="Runmed",color = "intrcpt",palette = temp,
+           numeric.x.axis = TRUE,plot_type="l",xlim=c(0.6,0.8),ylim=c(-0.2,0),
+           xlab="Expression level [a.u.]", ylab="Mutational effects [a.u.]")
+
+grid.arrange(g0,g1, nrow = 1)
+
+g5<-ggline(dfrunmed_nk,x="expression",y="Runmed",color = "intrcpt",palette = temp,
+           numeric.x.axis = TRUE,plot_type="l",xlim=c(0,1),ylim=c(-0.4,0.4),
+           xlab="Expression level [a.u.]", ylab="Mutational effect [a.u.]",legend="")+
+  scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.4),limits =  c(-0.4, 0.4))
+g5<-ggpar(g5,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+g5
+
+g5e<-ggline(dfrunmed_nk,x="expression",y="Runmed",color = "intrcpt",palette = temp,
+           numeric.x.axis = TRUE,plot_type="l",xlim=c(0.4,0.8),ylim=c(-0.15,0.1),
+           xlab="Expression level [a.u.]", ylab="Mutational effect [a.u.]",legend="")+
+  scale_x_continuous(breaks = get_breaks(by = 0.2, from = 0.4),limits =  c(0.4, 0.8)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.1, from = -0.2),limits =  c(-0.15, 0.1))
+g5e<-ggpar(g5e,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+g5e
+```
+### 6.3.3. 
+```{r Data_Source,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=9.6,dpi=300}
+temp1<-NK_exlandscape_list[[1]]
+temp1$uphillratio<-uphill_ratio(temp1$shape)
+
+g1<-ggscatter(temp1,x="hmdist",y="expression",color="uphillratio",alpha=0.5,size=2,
+          xlab="Hamming distance",ylab="Expression level [a.u]",legend="")+
+    scale_x_continuous(breaks = get_breaks(by = 2, from = 0),limits =  c(0, 10)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+g1<-ggpar(g1,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+temp3<-NK_landscape_list[[1]]
+temp3$uphillratio<-uphill_ratio(temp3$shape)
+g2<-ggscatter(temp3,x="hmdist",y="fitness",color="uphillratio",alpha=0.5,size=2,ylim=c(0,1),
+          xlab="Hamming distance",ylab="Fitness [a.u]",legend="")+
+  geom_hline(yintercept = intrcpt[1],color=temp[1])+
+  scale_x_continuous(breaks = get_breaks(by = 2, from = 0),limits =  c(0, 10)) +
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = 0),limits =  c(0, 1)) +
+  scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+g2<-ggpar(g2,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+g3<-ggscatter(temp1,x="expression",y="muteffect",color="uphillratio",alpha=0.5,size=2,
+          xlab="Expression level [a.u.]",ylab="Mutational effect [a.u.]",legend="",xlim=c(0,1),ylim=c(-0.4,0.4))+
+          scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+          scale_color_gradient2(low  = "#C26B51",mid  = "#DDCE47",high = "#529985",midpoint = 0.5,limits=c(0,1))
+g3<-ggpar(g3,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
+
+grid.arrange(g1,g3,g2, nrow = 1)
+```
+## 6.4. Output
+```{r RMF,warning=FALSE, message=FALSE,fig.height=3.2,fig.width=3.2,dpi=300}
+# expression landscape
+for(i in 1:length(NK_exlandscape_list)){
+  my_tmp<-NK_exlandscape_list[[i]]
+  my_tmp$ID<-i
+  if(i==1){
+    my_df<-my_tmp
+  }else{
+    my_df<-bind_rows(my_df,my_tmp)
+  }
+}
+my_df<-my_df %>% select(ID,everything())
+write_csv(my_df,file = paste(getwd(),"Output","ExprsLandscape_NK.csv",sep = "/"))
+
+# fitness landscape
+my_ids<-rep(seq(1,length(NK_exlandscape_list)),each=length(intrcpt))
+for(i in 1:length(NK_landscape_list)){
+  my_tmp<-NK_landscape_list[[i]]
+  my_tmp$ID<-my_ids[i]
+  if(i==1){
+    my_df<-my_tmp
+  }else{
+    my_df<-bind_rows(my_df,my_tmp)
+  }
+}
+my_df<-my_df %>% select(ID,everything())
+write_csv(my_df,file = paste(getwd(),"Output","FitnessLandscape_NK.csv",sep = "/"))
+
+# mutational effect
+write_csv(dMutEffect_nk,file = paste(getwd(),"Output","MutEffect_NK.csv",sep = "/"))
+```

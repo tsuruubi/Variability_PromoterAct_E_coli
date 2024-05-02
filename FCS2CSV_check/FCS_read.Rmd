@@ -1,0 +1,1145 @@
+---
+title: "Hatanaka_FlowData "
+author: "Tsuru"
+date: "2022/8/16"
+output: html_document
+---
+
+# 0. General settings
+## 0.1. Load workspace
+```{r General,warning=FALSE, message=FALSE}
+# load("./reanalysis.RData")
+```
+## 0.2. Save workspace
+```{r General,warning=FALSE, message=FALSE}
+# save.image("./reanalysis.RData")
+```
+## 0.3. Library loading
+```{r General,warning=FALSE, message=FALSE}
+library(flowCore)
+library(viridis)
+library(ggplot2)
+library(GGally)
+library(scales)
+library(ggpubr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(dplyr)
+library(matrixStats)
+library(preprocessCore)
+library(RColorBrewer)
+library(openxlsx)
+library(readxl)
+library(ggsci)
+library(cowplot)
+library(corrplot)
+library(Hmisc)
+# https://stackoverflow.com/questions/59419647/hmisc-package-or-namespace-failed-to-load-no-package-called-latticeextra
+library(corrplot)
+library(tidyverse)
+library(magrittr)
+library(dendextend)
+library(FactoMineR)
+library(factoextra)
+library(proxy)
+library(rstatix)
+# library(plot3D)
+# library(clusterProfiler)
+# library(pathview)
+# library(org.EcK12.eg.db)
+# library(rvest)
+library(corrr)
+# library(GOSemSim)
+# library(rrvgo)
+# library(qdapTools)
+# library(AnnotationDbi)
+# library(ggVennDiagram)
+# library(rJava)
+# library(venneuler)
+# library(igraph)
+# library(tidygraph)
+library(stringdist)
+
+library(ggtree)
+library(ape)
+library(colorspace)
+library(Biostrings)
+library(msa)#
+library(seqinr)#
+library(ggtreeExtra)#
+library(tinytex)
+library(tools)
+library(stringr)
+library(ggmsa)#
+library(bios2mds)#
+Sys.time()
+```
+
+## 0.4. versatile user functions
+The [qw](https://ja.coder.work/so/r/240447) function in Perl.  
+The [createEmptyDf](https://htsuda.net/archives/2560) function.
+The [g_legend](https://github.com/hadley/ggplot2/wiki/Share-a-legend-between-two-ggplot2-graphs) function to extract legend.
+```{r General}
+qw <- function(...) {
+  sapply(match.call()[-1], deparse)
+}
+
+createEmptyDf = function( nrow, ncol, colnames = c() ){
+  data.frame( matrix( vector(), nrow, ncol, dimnames = list( c(), colnames ) ) )
+}
+
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)}
+
+pValue_sp_text=function(dtf){
+  pcor_sp<-cor.test(x=dtf[,1],y=dtf[,2],method="spearman")
+  rho_sp<-round(pcor_sp$estimate,digits = 2)
+  pv_sp<-ifelse(pcor_sp$p.value<0.05," P<0.05",paste(" P==",round(pcor_sp$p.value,digits = 1),sep = ""))
+  rhopvtxt_sp<-paste("list(italic(rho)==", rho_sp,", ",pv_sp,")")
+  return(rhopvtxt_sp)
+}
+
+pValue_pr_text=function(dtf){
+  pcor_pr<-cor.test(x=dtf[,1],y=dtf[,2],method="pearson")
+  r_pr<-round(pcor_pr$estimate,digits = 2)
+  pv_pr<-ifelse(pcor_pr$p.value<0.05," P<0.05",paste(" P==",round(pcor_pr$p.value,digits = 1),sep = ""))
+  rpvtxt_pr<-paste("list(italic(r)==", r_pr,", ",pv_pr,")")
+  return(rpvtxt_pr)
+}
+Sys.time()
+```
+
+```{r Generic_prop,warning=FALSE, message=FALSE,fig.height=1.2,fig.width=1.2,dpi=300}
+my_fcs<-read.FCS("8peak.fcs")
+my_df<-my_fcs@exprs %>% data.frame()
+my_df<-my_df %>% select(FSC.A,SSC.A,FITC.A,PE.A)
+colnames(my_df)<-qw(FSC,SSC,FITC,PE)
+my_df<-round(my_df,digits = 2)
+
+write_csv(my_df,"8peak_test.csv",)
+
+Sys.time()
+```
+
+
+
+
+
+
+
+# 1. Generic properties
+## 1.1. Essentiality
+https://journals.asm.org/doi/10.1128/mbio.02096-17
+```{r Generic_prop,warning=FALSE, message=FALSE,fig.height=1.2,fig.width=1.2,dpi=300}
+# Name Space of CDS based on W3110
+dgnw3110<-paste(getwd(),"W3110CDSList.txt",sep="/") %>%
+  read_delim()
+# Essentiality
+dess<-paste(getwd(),"BW25113ESSCDSList.txt",sep="/") %>%
+  read_delim(col_names = qw(Name,ECKnb))
+dess$Essentiality<-"Essential"
+dess<-dess %>% select(ECKnb,Essentiality)
+
+dgnw3110<-left_join(dgnw3110,dess,by="ECKnb")
+dgnw3110[is.na(dgnw3110$Essentiality),]$Essentiality<-"Nonessential"
+
+# Bnb to EntrezID
+dBnbtoEntrezID<-paste(getwd(),"proteins_167_161521.csv",sep="/") %>%
+  read_csv(skip = 1)
+colnames(dBnbtoEntrezID)[colnames(dBnbtoEntrezID)=="Locus tag"]<-"Bnb"
+colnames(dBnbtoEntrezID)[colnames(dBnbtoEntrezID)=="Locus"]<-"Gene"
+
+Sys.time()
+```
+
+
+# 2. Mutational effect
+## 2.1. Calc. mutational effect
+```{r Mut_Effect,warning=FALSE, message=FALSE}
+# External SSD
+my_volume<-"/Volumes/DailyUse"
+df_all<-paste(my_volume,"Hatanaka/Hatanaka_HDD/Jupyter_backup/forplt/20211101/all_dat.csv",sep="/") %>%
+  read_csv()
+colnames(df_all)[1]<-"ID"
+df_all$category<-ifelse(df_all$essentiality=="synthetic","Syn",ifelse(df_all$essentiality=="nonessential","Nes","Ess"))
+df_all$category<-factor(df_all$category,levels = qw(Syn,Nes,Ess))
+# Calc. mutational effect
+df_all$muteffect<-df_all$mean_m-df_all$mean
+# Compensation of mean-dependency in mutational effect
+m<-lm(df_all$muteffect~df_all$mean)
+summary(m)
+df_all$norm_muteffect<-df_all$muteffect-(df_all$mean*m$coefficients[2]+m$coefficients[1])
+
+Sys.time()
+```
+## 2.2. Expression level
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+my_fontsize<-16
+# one-way ANOVA
+df_all %>% anova_test(mean ~ category)
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggerrorplot(df_all,x="category",y="mean",alpha=0.5,size=0.5,
+            color="category",palette = mycolpal,legend="",
+            desc_stat = "mean_sd",
+          add = "jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.5),
+          ylab="Expression level [a.u.]",
+          xlab="Promoters")+
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))+
+  stat_compare_means(method = "anova",size=5)
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+## 2.3. GC ratio of promoters
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+# one-way ANOVA
+df_all %>% anova_test(GC_ratio ~ category)
+
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggerrorplot(df_all,x="category",y="GC_ratio",alpha=0.5,size=0.5,
+            color="category",palette = mycolpal,legend="",
+            desc_stat = "mean_sd",
+          add = "jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.5),
+          ylab="GC ratio",
+          xlab="Promoters")+
+  scale_y_continuous(breaks = get_breaks(by = 0.1, from = 0.4),limits =  c(0.35, 0.6))+
+  stat_compare_means(method = "anova",label.y = 0.59,size=5)
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+## 2.4. Comparison of expression levels between Mut and WT
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=4,dpi=300}
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggscatter(df_all,x="mean",y="mean_m",alpha=0.5,size=2,
+            color="category",palette = mycolpal,
+          legend.title="",legend="right",
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 2,label.y=4, label.sep = "\n",size=5),
+          xlab="Expression level of WT [a.u.]",
+          ylab="Expression level of Mut [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  geom_abline(slope = 1,intercept = 0,color="black",size=0.5,se = FALSE)+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.6, 4.5))+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.6, 4.5))
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = c(my_fontsize))
+p
+Sys.time()
+```
+## 2.5. Relationhip between Mutational effect and Expression level
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=4,dpi=300}
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggscatter(df_all,x="mean",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 3,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="right",
+          xlab="Expression level of WT [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.6, 4.5))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = c(my_fontsize))
+p
+Sys.time()
+```
+
+## 2.6. Comparison of mutational effect among promoter categories
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+mystep<-0.5
+stat.test <- df_all %>% wilcox_test(muteffect ~ category, p.adjust.method = "BH")
+stat.test <- stat.test %>% add_y_position(step.increase = mystep)
+# stat.test <- stat.test %>% p_format(p.adj, leading.zero = FALSE, accuracy = 0.01)
+# stat.test$y.position<-stat.test$y.position*2
+
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggerrorplot(df_all,x="category",y="muteffect",alpha=0.5,size=0.5,
+            color="category",palette = mycolpal,legend="",
+            desc_stat = "mean_sd",
+          add = "jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.5),
+          ylab="Mutational effect [a.u.]",
+          xlab="Promoters")+
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))+
+  # stat_pvalue_manual(stat.test, label = "p.adj.signif", tip.length = 0)+
+  stat_pvalue_manual(stat.test, label = "p.adj", tip.length = 0.02,size=5)
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+
+## 2.7. normalized mutational effect
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=4,fig.width=4,dpi=300}
+mystep<-0.3
+stat.test <- df_all %>% wilcox_test(norm_muteffect ~ category, p.adjust.method = "BH")
+stat.test <- stat.test %>% add_y_position(step.increase = mystep)
+# stat.test <- stat.test %>% p_format(p.adj, leading.zero = FALSE, accuracy = 0.01)
+# stat.test$y.position<-stat.test$y.position*2
+
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggerrorplot(df_all,x="category",y="norm_muteffect",alpha=0.5,size=0.5,
+            color="category",palette = mycolpal,legend="",
+            desc_stat = "mean_sd",
+          add = "jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.5),
+          ylab="Normalized mutational effect [a.u.]",
+          xlab="Promoters")+
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))+
+  # stat_pvalue_manual(stat.test, label = "p.adj.signif", tip.length = 0)+
+  stat_pvalue_manual(stat.test, label = "p.adj", tip.length = 0.02,size=5)
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+## 2.8. Mutational effect vs GC ratio
+```{r Mut_Effect,warning=FALSE, message=FALSE,fig.height=3,fig.width=4.5,dpi=300}
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggscatter(df_all,x="GC_ratio",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 0.5,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="right",
+          xlab="GC ratio [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  scale_x_continuous(breaks = get_breaks(by = 0.1, from = 0.3),limits =  c(0.34, 0.6))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = my_fontsize)
+p
+Sys.time()
+```
+
+# 3. Transcriptional plasticity (M3D)
+http://m3d.mssm.edu
+## 3.1. Calc. transcriptional plasticity (DMp)
+```{r M3D,warning=FALSE, message=FALSE,fig.height=3,fig.width=3.5,dpi=300}
+dm3_raw<-paste(getwd(),"M3D","M3D_v4build6","avg_E_coli_v4_Build_6_exps466probes4297.tab",sep="/") %>%
+  read_delim()
+my_tmp<-str_split(string = dm3_raw$`E_coli_v4_Build_6:genes`,pattern = "_")
+df_m3<-createEmptyDf(nrow = nrow(dm3_raw),ncol=4,colnames=qw(Gene,b_number,logmean,logsd))
+for (i in 1:nrow(df_m3)){
+  df_m3$Gene[i]<-my_tmp[[i]][1]
+  df_m3$b_number[i]<-my_tmp[[i]][2]
+  df_m3$logmean[i]<-rowMeans(as.matrix(dm3_raw[i,2:ncol(dm3_raw)]))
+  df_m3$logsd[i]<-rowSds(as.matrix(dm3_raw[i,2:ncol(dm3_raw)]))
+}
+rm(my_tmp)
+
+df_m3<-df_m3[order(df_m3$logmean),] # sorting 
+df_m3<-transform(df_m3,RunmedVar=runmed(df_m3$logsd,41),lmp=df_m3$logmean)
+lmpn<-data.frame(x=df_m3$lmp,y=df_m3$RunmedVar)
+sp<-smooth.spline(lmpn,df=12)
+lx<-seq(min(lmpn$x),max(lmpn$x),length=1000)
+pred_pl<-as.data.frame(lx)
+pred_pl$smsp<-predict(sp,lx)$y
+colnames(pred_pl)<-c("logx","smoothsp")
+pred2<-data.frame(logx=df_m3$logmean)
+pred2$y<-predict(sp,pred2$logx)$y
+colnames(pred2)<-c("logx","smoothsp")
+df_m3$SmoothSpline<-pred2$smoothsp
+df_m3$DMp<-df_m3$logsd-df_m3$SmoothSpline # calculate distance from smooth spline to SD 
+
+df_pl<-left_join(df_all,df_m3[,which(colnames(df_m3) %in% qw(b_number,DMp))],by="b_number")
+Sys.time()
+```
+## 3.2. Relationship between expression levels and standard deviations
+```{r M3D,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.5,dpi=300}
+p1<-ggscatter(df_m3,x="logmean",y="logsd",color = "gray20", alpha = 0.2, size=0.3,
+              cor.coef = T,cor.coeff.args = list(method = "spearman", label.x = 3.2, label.y=2.7, label.sep = "\n",size=5))+
+  labs(x="mRNA epression level [a.u]",y="Standard deviation [a.u.]")+
+  geom_line(data=df_m3,aes(x=logmean,y=RunmedVar), colour="magenta", size=0.5)+
+  geom_line(data=pred_pl,aes(x=lx,y=smoothsp), colour="deepskyblue", size=0.5) 
+  # annotate("text",x=-Inf,y=Inf,label="Smooth Spline", hjust = -0.1,vjust = 1, colour="deepskyblue")+
+  # annotate("text",x=-Inf,y=Inf,label="Running Median", hjust = -0.1,vjust = 2.5, colour="magenta")
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+p2<-ggscatter(df_m3,x="logmean",y="DMp",color = "gray20", alpha = 0.2, size=0.3,
+              cor.coef = T,cor.coeff.args = list(method = "spearman", label.x = 3.2, label.y=2.2, label.sep = "\n",size=5))+
+  labs(x="mRNA epression level [a.u]",y="Transcriptional plasticity [a.u.]")
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+Sys.time()
+```
+
+
+## 3.3. Mutational effect vs transcriptional plasticity
+raw values and absolute values of mutational effect
+```{r M3D,warning=FALSE, message=FALSE,fig.height=3,fig.width=3.6,dpi=300}
+figtemp<-df_pl[df_pl$category %in% qw(Ess,Nes),]
+figtemp$abs.muteffect<-abs(figtemp$muteffect)
+mycolpal<-c("gray40",get_palette("lancet",2))
+
+p1<-ggscatter(figtemp,x="DMp",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal[c(2,3)],
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 0.4,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="Transcriptional plasticity [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 0.4, from = -0.4),limits =  c(-0.4, 0.8))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+p2<-ggscatter(figtemp,x="DMp",y="abs.muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal[c(2,3)],
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 0.4,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="Transcriptional plasticity [a.u.]",
+          ylab="|Mutational effect| [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 0.4, from = -0.4),limits =  c(-0.4, 0.8))+
+  # scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))+
+  scale_y_continuous(breaks = get_breaks(by = 0.1, from = 0),limits =  c(0, 0.3))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+Sys.time()
+```
+
+## 3.4. Normalized Mutational effect vs transcriptional plasticity
+raw values and absolute values of normalized mutational effect
+```{r M3D,warning=FALSE, message=FALSE,fig.height=4,fig.width=4,dpi=300}
+figtemp<-df_pl[df_pl$category %in% qw(Ess,Nes),]
+figtemp$abs.norm_muteffect<-abs(figtemp$norm_muteffect)
+mycolpal<-c("gray40",get_palette("lancet",2))
+
+
+p1<-ggscatter(figtemp,x="DMp",y="norm_muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal[c(2,3)],
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 0.4,label.y=0.15, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="Transcriptional plasticity [a.u.]",
+          ylab="Normalized mutational effect [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 0.4, from = -0.4),limits =  c(-0.4, 0.8))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.2, 0.2))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+p2<-ggscatter(figtemp,x="DMp",y="abs.norm_muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal[c(2,3)],
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 0.4, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="Transcriptional plasticity [a.u.]",
+          ylab="|Normalized mutational effect| [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 0.4, from = -0.4),limits =  c(-0.4, 0.8))+
+  # scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))+
+  scale_y_continuous(breaks = get_breaks(by = 0.1, from = 0),limits =  c(0, 0.2))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+Sys.time()
+```
+
+
+# 4. Overexpression Toxicity
+https://www.mdpi.com/2073-4425/9/8/414
+doi:10.3390/genes9080414
+## 4.1. load dataset
+```{r Toxicity,warning=FALSE, message=FALSE,fig.height=1.3,fig.width=1.9,dpi=300}
+dtox_raw<-paste(getwd(),"Chen_2018","SupplFolder","Table S1.xlsx",sep="/") %>%
+  read_xlsx(sheet = "Gene length",skip = 1)
+colnames(dtox_raw)<-str_replace_all(string =colnames(dtox_raw),pattern = " ",replacement = "." )
+
+
+dtox_raw<-left_join(dtox_raw,dgnw3110,by=c("Gene.name"="Name"))
+df_ot<-dplyr::left_join(df_all,dtox_raw[,which(colnames(dtox_raw) %in% qw(Bnb,Delay.factor))],by=c("b_number"="Bnb"))
+Sys.time()
+```
+
+## 4.2. Mutational effect vs overexpression toxicity
+```{r Toxicity,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.7,dpi=300}
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggscatter(df_ot[df_ot$category %in% qw(Ess,Nes),],x="Delay.factor",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal[c(2,3)],
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 7,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="Overexpression toxicity [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  scale_x_continuous(breaks = get_breaks(by = 5, from = 0),limits =  c(0, 15))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+## 4.3. Normalized Mutational effect vs overexpression toxicity
+```{r Toxicity,warning=FALSE, message=FALSE,fig.height=4,fig.width=3.7,dpi=300}
+mycolpal<-c("gray40",get_palette("lancet",2))
+p<-ggscatter(df_ot[df_ot$category %in% qw(Ess,Nes),],x="Delay.factor",y="norm_muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal[c(2,3)],
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 7, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="Overexpression toxicity [a.u.]",
+          ylab="Normalized mutational effect [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  scale_x_continuous(breaks = get_breaks(by = 5, from = 0),limits =  c(0, 15))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.2, 0.2))
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+```
+
+# 5. Sequence analysis
+## 5.1. load dataset
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+dsig70motdat<-paste(my_volume,"Hatanaka/Hatanaka_HDD/Jupyter_backup/forplt/Fig2seq/dsigmulon70used.csv",sep="/") %>%
+  read_csv()
+colnames(dsig70motdat)<-qw(Promname_RegulonDB,m10box,m35box)
+dmeta<-paste(dirname(getwd()),"Reanalysis_20220816","metadata.csv",sep="/") %>%
+  read_csv()
+dsig70motdat$category<-NA
+temp<-unlist(str_split(dmeta[(dmeta$Used=="Yes")&(dmeta$Genotype=="wild type")&(dmeta$Essentiality=="essential"),]$Promname_RegulonDB,"@"))
+dsig70motdat[dsig70motdat$Promname_RegulonDB %in% temp,]$category<-"Ess"
+temp<-unlist(str_split(dmeta[(dmeta$Used=="Yes")&(dmeta$Genotype=="wild type")&(dmeta$Essentiality=="nonessential"),]$Promname_RegulonDB,"@"))
+dsig70motdat[dsig70motdat$Promname_RegulonDB %in% temp,]$category<-"Nes"
+
+dsig70motdat<-dsig70motdat[(!is.na(dsig70motdat$category))&(!is.na(dsig70motdat$m10box))&(!is.na(dsig70motdat$m35box)),]
+
+dsig70motdat$lvdist<-stringdist(dsig70motdat$m10box,"TATAAT",method = "lv")+
+  stringdist(dsig70motdat$m35box,"TTGACA",method = "lv")
+Sys.time()
+```
+## 5.2. Levenstein Distance
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+mycolpal<-c("gray40",get_palette("lancet",2))
+my_tmp<-dsig70motdat
+p<-ggerrorplot(dsig70motdat,x="category",y="lvdist",alpha=0.5,size=0.5,
+            color="category",palette = mycolpal[c(2,3)],legend="",
+            desc_stat = "mean_sd",
+          add = "jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.5),
+          ylab="Levenshtein distance",
+          xlab="Promoters")+
+  # scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))+
+  stat_compare_means(label.y = 7,size=5)
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+## 5.3. Phylogenetic tree
+### 5.3.1. load data
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=1.3,fig.width=1.3,dpi=300}
+
+dseqinfo<-paste(getwd(),"Analysis_R","ess_sig70","SeqInfo.csv",sep="/") %>%
+  read_csv()
+dseqinfo$Essentiality<-ifelse(is.na(dseqinfo$Essentiality),"Syn",ifelse(dseqinfo$Essentiality=="Nonessential","Nes","Ess"))
+
+
+seqs<-paste(getwd(),"Analysis_R","ess_sig70","promoters_tree.fasta",sep="/") %>%
+  readDNAStringSet()
+seqs<-seqs[!(names(seqs) %in% dmeta[dmeta$Used!="Yes",]$Gene_name)]
+head(seqs)
+Sys.time()
+```
+### 5.3.2. Filtration
+Obtain 73 short DNA sequences from 3'
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=5,fig.width=5,dpi=300}
+test<-reverseComplement(seqs)
+test<-subseq(test,start = 1,width = 73)
+seqs_73<-reverseComplement(test)
+head(seqs_73)
+Sys.time()
+```
+
+### 5.3.3. Alignment
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=8,fig.width=10,dpi=300}
+seqalign_73<-msa(seqs_73,method = "ClustalOmega")
+# alignment
+alignComg_as_align_73 <- msaConvert(seqalign_73, "bios2mds::align")
+# output
+# export.fasta(alignComg_as_align_73, outfile = paste(getwd(),"Output","alignComg_as_align.fa",sep="/"), ncol =70, open = "w")
+
+
+# alignComg_as_align_73<-readDNAStringSet("alignComg_as_align.fa")
+# ggmsa(alignComg_as_align, start = NULL, end = NULL, color = "Chemistry_NT", seq_name = TRUE )
+Sys.time()
+```
+### 5.3.4. Phylogenetic Tree of promoters
+https://bioconductor.riken.jp/packages/3.8/bioc/vignettes/ggtree/inst/doc/treeManipulation.html
+https://yulab-smu.top/treedata-book/chapter4.html
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=6,fig.width=3,dpi=300}
+alignment_seqinr<-msaConvert(seqalign_73,type="seqinr::alignment")
+distances<-seqinr::dist.alignment(alignment_seqinr,"identity") # compute the distance matrix from the alignment
+# heatmap(x=as.matrix(distances))
+tree<-ape::nj(distances) # compute the neighbor-joining tree
+
+cls <- list(Syn=dseqinfo[is.na(dseqinfo$Bnb)==T,]$Name,
+            Nes=dseqinfo[is.na(dseqinfo$Bnb)==F&dseqinfo$Essentiality=="Nes",]$Name,
+            Ess=dseqinfo[is.na(dseqinfo$Bnb)==F&dseqinfo$Essentiality=="Ess",]$Name)
+tree <- groupOTU(tree, cls)
+mycolpal<-get_palette("lancet",9)
+
+# ggtree(tree,layout="circular", branch.length='none')+
+#   geom_tiplab(aes(color=group))+
+#   scale_color_manual(values=c(mycolpal[2],mycolpal[1],"gray40"))+ 
+#   theme(legend.position="")
+
+ggtree(tree)+
+    geom_tippoint(aes(color=group))+
+  scale_color_manual(values=c(mycolpal[2],mycolpal[1],"gray70"))+ 
+  theme(legend.position="")+
+  # geom_tiplab(aes(subset=(group=="Syn")),offset=0.01, size=3)+
+  geom_treescale(offset=-2.5,width=0.1)+ xlim_tree(0.6)
+
+Sys.time()
+
+# # compute bootstrap values for the mj tree
+# NJtree <-function (alignment)
+# {
+#   # define a function for generating the distance matrix from the previous alignment
+#   makemytree<-function(alignmentmat)
+#   {
+#     alignment<-ape::as.alignment(alignmentmat)
+#     alignmentbin <- as.DNAbin(alignment)
+#     mydist<-dist.dna(alignmentbin)
+#     mytree<-njs(mydist)
+#     return(mytree)
+#   }
+#   # infer a tree
+#   mymat <- as.matrix.alignment(alignment)
+#   mytree<- makemytree(mymat)
+#   # bootstrap the tree
+#   myboot <- boot.phylo(mytree, mymat, makemytree)
+#   mytree$node.label<- myboot
+#   return(mytree)
+# }
+# bootAO<-NJtree(alignment_seqinr)
+
+```
+### 5.3.5. Length of external branches
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=1.2,fig.width=1.2,dpi=300}
+temp<-cophenetic.phylo(tree)
+temp[temp==0]<-NA
+head(temp)
+print(paste("Minimal length between branches:" ,min(temp,na.rm=T),sep=" "))
+# max(temp,na.rm=T)
+print(paste("Maximal length between nearest branches:" ,max(colMins(temp,na.rm=T)),sep=" "))
+Sys.time()
+```
+### 5.3.6. Phylogenetic Tree of sigma 70 core elements
+```{r Seq_Anal,warning=FALSE, message=FALSE,fig.height=2,fig.width=3,dpi=300}
+Boxseqs<-paste(getwd(),"Analysis_R","ess_sig70","Box.fa",sep="/") %>%
+  readDNAStringSet()
+temp<-names(Boxseqs)
+Boxseqs<-Boxseqs[names(Boxseqs) %in% dsig70motdat$Promname_RegulonDB]
+
+seqalign<-msa(Boxseqs,method = "ClustalOmega")
+alignment_seqinr<-msaConvert(seqalign,type="seqinr::alignment")
+distances<-seqinr::dist.alignment(alignment_seqinr,"identity") # compute the distance matrix from the alignment
+# heatmap(x=as.matrix(distances))
+tree<-ape::nj(distances) # compute the neighbor-joining tree
+
+cls <- list(Nes=dsig70motdat[dsig70motdat$category=="Nes",]$Promname_RegulonDB,
+            Ess=dsig70motdat[dsig70motdat$category=="Ess",]$Promname_RegulonDB)
+
+tree <- groupOTU(tree, cls)
+mycolpal<-get_palette("lancet",9)
+
+ggtree(tree)+
+    geom_tippoint(aes(color=group))+
+  scale_color_manual(values=c(mycolpal[2],mycolpal[1],"gray60"))+ 
+  theme(legend.position="")+
+  geom_tiplab(aes(subset=(group=="Synthetic")),offset=0.01, size=3)+
+  geom_treescale(offset=-2.5,width=0.1)+ xlim_tree(0.6)
+Sys.time()
+```
+
+# 6. Analysis of flow data (csv)
+## 6.1. load mg1655 data
+```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.5,dpi=300}
+ddflowcsvs<-paste(my_volume,"Hatanaka/Hatanaka_HDD/Jupyter_backup/forplt/20211101/",sep="/")
+# ddflowcsvs<-paste(dirname(getwd()),"Hatanaka_HDD","Jupyter_backup","forplt","20211101",sep = "/")
+
+autofl<-paste(ddflowcsvs,"MG1655.csv",sep = "/") %>%
+  read_csv()
+autofl$log10FSCpls3<-log10(autofl$FSC+1000)
+# fscmode<-as.numeric(names(which.max(table(autofl$log10FSCpls3))))
+hist_info <- hist(autofl$log10FSCpls3,plot=F,breaks = seq(2.5,5.5,0.01))               # Extract histogram information
+fscmode<-hist_info$breaks[which(hist_info$density==max(hist_info$densit))]
+
+p1<-gghistogram(autofl,x="log10FSCpls3",y="density",fill="gray10",size=0,bins=50)+
+  xlab(expression(log[10]~"FSC [a.u.]"))+
+  ylab("Relative frequency [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 3),limits =  c(2.7, 5.5))+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0, 2.5))+
+  geom_vline(xintercept = fscmode,size=0.2,linetype=2)+
+  geom_vline(xintercept = c(3.675,3.864),size=0.2,linetype=2,color=get_palette("lancet",2)[2])
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+autofl.th<-quantile(autofl[(autofl$log10FSCpls3>3.675)&(autofl$log10FSCpls3<3.864),]$FITC,0.995)
+
+p2<-gghistogram(autofl,x="FITC",y="density",fill = "gray10", size=0,bins=50,
+            xlab="Green FI [a.u.]",
+            ylab="Relative frequency [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 500, from = 0),limits =  c(-300, 1100))+
+  scale_y_continuous(breaks = get_breaks(by = 0.002, from = 0),limits =  c(0, 0.0045))+
+  geom_vline(xintercept = autofl.th,size=0.2,linetype=2,color=get_palette("lancet",2)[2])
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+rm(autofl)
+Sys.time()
+```
+
+## 6.2. density plot of Green FI of synthetic promoter library
+```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.5,dpi=300}
+randC<-paste(ddflowcsvs,"Rand_C.csv",sep = "/") %>%
+  read_csv()
+randC$log10FITC<-ifelse(randC$FITC>0,log10(randC$FITC),NA)
+
+p<-gghistogram(randC[(randC$FSC>4800)&(randC$FSC<8000)&(randC$PE<1000),],x="log10FITC",y="density",fill = "gray10", size=0,bins=50)+
+            xlab(expression(log[10]~"Green FI [a.u.]"))+
+            ylab("Relative frequency [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 2, from = 0),limits =  c(0, 6))+
+  scale_y_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1.5))+
+  annotate("text",x=Inf,y=Inf,label= "Sorting\nregion",hjust = 1,vjust = 1,size=5,color=get_palette("lancet",2)[2])+
+  geom_vline(xintercept = 3,size=0.2,linetype=2,color=get_palette("lancet",2)[2])
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+rm(randC)
+Sys.time()
+```
+
+## 6.3. density plot of Green FI for metG and metGm
+```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=4,dpi=300}
+dmetG<-paste(ddflowcsvs,"metG.csv",sep = "/") %>%
+  read_csv()
+dmetG_m<-paste(ddflowcsvs,"metG_m.csv",sep = "/") %>%
+  read_csv()
+dmetG$Name<-"WT"
+dmetG_m$Name<-"Mut"
+temp<-bind_rows(dmetG,dmetG_m)
+temp$log10FSCpls3<-log10(temp$FSC+1000)
+temp$FITCsbt<-temp$FITC-autofl.th
+temp$log10FITCnorm<-ifelse(temp$FITCsbt>0,log10(temp$FITCsbt),NA)
+temp<-temp[(temp$log10FSCpls3>3.675)&(temp$log10FSCpls3<3.864)&(!is.na(temp$log10FITCnorm))&(temp$PE<1000),]
+temp$Name<-factor(temp$Name,levels=qw(WT,Mut))
+
+p<-gghistogram(temp,x="log10FITCnorm",y="density", size=0,bins=50,alpha=0.4,
+            legend="right",legend.title="",
+            add="mean", add.params = list(size=0.5,linetype=5),
+            color="Name",fill="Name",palette = c("#00AFBB","#D870AD"))+
+            xlab(expression(log[10]~"Green FI [a.u.]"))+
+            ylab("Relative frequency [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.5, 4.5))+
+  annotate("text",x=-Inf,y=Inf,label= "NPmutG",hjust = -0.2,vjust = 1,size=5)
+  # scale_y_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1.5))
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+rm(dmetG,dmetG_m,temp)
+Sys.time()
+```
+
+## 6.4. density plot of Green FI for all strains
+```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=2,fig.width=20,dpi=300}
+my_tmp<-dmeta[(!is.na(dmeta$Used))&(!is.na(dmeta$Genotype))&(!is.na(dmeta$Type)),]
+mylist<-unique(my_tmp[(my_tmp$Used=="Yes")&(my_tmp$Genotype=="wild type")&(my_tmp$Type=="Promoter"),]$Promoter_Name)
+i<-1
+figlist<-list()
+for(i in 1:length(mylist)){
+  ddw<-dmeta[(dmeta$Promoter_Name %in% mylist[i])&(dmeta$Genotype=="wild type"),]$CSV_filename_new
+  ddm<-dmeta[(dmeta$Promoter_Name %in% mylist[i])&(dmeta$Genotype=="mutant library"),]$CSV_filename_new
+  dw<-data.frame(read_csv(paste(ddflowcsvs,ddw,sep = "/")))
+  dw$Name<-"WT"
+  dm<-data.frame(read_csv(paste(ddflowcsvs,ddm,sep = "/")))
+  dm$Name<-"Mut"
+  dwm<-bind_rows(dm,dw)
+  dwm$log10FSCpls3<-log10(dwm$FSC+1000)
+  dwm$FITCsbt<-dwm$FITC-autofl.th
+  dwm$log10FITCnorm<-ifelse(dwm$FITCsbt>0,log10(dwm$FITCsbt),NA)
+  dwm<-dwm[(dwm$log10FSCpls3>3.675)&(dwm$log10FSCpls3<3.864)&(!is.na(dwm$log10FITCnorm))&(dwm$PE<1000),]
+  dwm$Name<-factor(dwm$Name,levels=qw(WT,Mut))
+  g<-gghistogram(dwm,x="log10FITCnorm",y="density", size=0,bins=50,alpha=0.4,
+            legend="",legend.title="",
+            # add="mean", add.params = list(size=0.5,linetype=5),
+            color="Name",fill="Name",palette = c("#00AFBB","#D870AD"),
+            xlab="",ylab="",subtitle=mylist[i]
+            # xlab=expression(log[10]~"Green FI [a.u.]"),
+            # ylab="Relative frequency [a.u.]"
+            )+
+    # annotate("text",x=-Inf,y=Inf,label= mylist[i],hjust = -0.2,vjust = 1,size=5)+
+    scale_x_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0, 6))+
+    scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0, 3.5))
+  g<-ggpar(g,font.tickslab =c(15),font.subtitle = c(20))
+  figlist[[i]]<-g
+}
+
+rm(dw,dm,dwm,g)
+
+k<-1
+for(l in 1:7){
+  if(l<7){
+    grid.arrange(figlist[[k+1]],figlist[[k+2]],figlist[[k+3]],figlist[[k+4]],figlist[[k+5]],figlist[[k+6]],figlist[[k+7]],figlist[[k+8]],figlist[[k+9]],figlist[[k+10]],nrow=1)
+    k<-k+10
+  }else{
+    grid.arrange(figlist[[1]],figlist[[2]],ncol=10)
+  }
+}
+rm(figlist)
+Sys.time()
+```
+
+
+# 7. Mutation rate
+```{r Mutation_Rate,warning=FALSE, message=FALSE,fig.height=3,fig.width=4.5,dpi=300}
+dmutrate<-paste(my_volume,"Hatanaka/Hatanaka_HDD/Jupyter_backup/forplt/mutation rate.csv",sep="/") %>%
+  read_csv()
+dmutrate<-dmutrate[9:nrow(dmutrate),]
+colnames(dmutrate)<-qw(Gene_name,Nb_mut,Length,Rate_mut,Date,GC_ratio)
+dmutrate<-left_join(dmutrate,dmeta[dmeta$Genotype=="wild type",which(colnames(dmeta) %in% qw(Gene_name,Promoter_Name))],by="Gene_name")
+
+p1<-ggscatter(dmutrate,x="Length",y="Rate_mut",color = "Promoter_Name",legend="right",legend.title="",xlab="Promoter length [bp]", ylab="Mutation rate [1/kb]",alpha=0.5,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 300, label.y=14, label.sep = "\n",size=5))+
+  scale_x_continuous(breaks = get_breaks(by = 50, from = 250),limits =  c(230, 390))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = my_fontsize)
+p1
+
+p2<-ggscatter(dmutrate,x="GC_ratio",y="Rate_mut",color = "Promoter_Name",legend="right",legend.title="",xlab="GC ratio", ylab="Mutation rate [1/kb]",alpha=0.5,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 0.5, label.y=14, label.sep = "\n",size=5))+
+  scale_x_continuous(breaks = get_breaks(by = 0.1, from = 0.4),limits =  c(0.4, 0.6))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = my_fontsize)
+p2
+Sys.time()
+```
+
+
+# 8. Transcription factor
+## 8.1. Mutational effect vs # of transcription factors
+```{r TF,warning=FALSE, message=FALSE,fig.height=3,fig.width=4.5,dpi=300}
+dtf<-paste(my_volume,"Hatanaka/Hatanaka_HDD/Jupyter_backup/forplt/TF_ad.csv",sep="/") %>%
+  read_csv()
+colnames(dtf)<-qw(Gene_name,Nb_act,Nb_rep)
+dtf$Nb_act.rep<-dtf$Nb_act-dtf$Nb_rep
+dtf<-left_join(dtf,df_all,by=c("Gene_name"="ID"))
+dtf<-left_join(dtf,dmeta[dmeta$Genotype=="wild type",which(colnames(dmeta) %in% qw(Gene_name, Promoter_Name,Essentiality))],by="Gene_name")
+
+
+mycolpal<-get_palette("lancet",2)
+p1<-ggscatter(dtf,x="Nb_act.rep",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 1,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="right",
+          xlab="# of activator - # of repressor [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  # scale_x_continuous(breaks = get_breaks(by = 0.1, from = 0.3),limits =  c(0.34, 0.6))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = my_fontsize)
+p1
+
+p2<-ggscatter(dtf,x="Nb_act",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 1,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="right",
+          xlab="# of activator [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  # scale_x_continuous(breaks = get_breaks(by = 0.1, from = 0.3),limits =  c(0.34, 0.6))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = my_fontsize)
+p2
+
+p3<-ggscatter(dtf,x="Nb_rep",y="muteffect",alpha=0.5,size=2,
+            color="category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 1,label.y=0.25, label.sep = "\n",size=5),
+          legend.title="",legend="right",
+          xlab="# of repressor [a.u.]",
+          ylab="Mutational effect [a.u.]")+
+  # geom_smooth(method="lm",fomula='y~x',color="black",size=0.5,se = FALSE)+
+  # scale_x_continuous(breaks = get_breaks(by = 0.1, from = 0.3),limits =  c(0.34, 0.6))+
+  scale_y_continuous(breaks = get_breaks(by = 0.2, from = -0.2),limits =  c(-0.25, 0.3))
+p3<-ggpar(p3,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize,font.legend = my_fontsize)
+p3
+Sys.time()
+```
+# 9. Transcriptome analysis of various E. coli strains
+https://www.nature.com/articles/s41564-020-00839-y#MOESM4
+## 9.1. load Table S6 RNA-seq
+```{r Evo,warning=FALSE, message=FALSE,fig.height=3,fig.width=4,dpi=300}
+dgloess<-paste(getwd(),"Rousset_2021","TableS5.csv",sep="/") %>%
+  read_csv()
+colnames(dgloess)<-qw(alos_LB,all_LB,alos_M9,all_M9,alos_GMM,all_GMM)
+dcol16<-paste(getwd(),"Rousset_2021","TableS6.csv",sep="/") %>%
+  read_csv()
+dcol16<-left_join(dcol16,dgnw3110[,which(colnames(dgnw3110) %in% qw(Name,Bnb))],by=c("Gene"="Name"))
+temp1<-dcol16[!is.na(dcol16$Bnb),]
+temp2<-dcol16[is.na(dcol16$Bnb),which(colnames(dcol16)!="Bnb")]
+my_tmp<-dBnbtoEntrezID %>% select(Gene,Bnb)
+temp2<-left_join(temp2,my_tmp,by="Gene")
+dcol16<-bind_rows(temp1,temp2)
+dcol16<-left_join(dcol16,dgnw3110[,which(colnames(dgnw3110) %in% qw(Bnb,Essentiality))],by="Bnb")
+dcol16[is.na(dcol16$Essentiality),]$Essentiality<-"Nonessential"
+dcol16$GlobalEssentiality<-"Nonessential"
+dcol16[dcol16$Gene %in% dgloess[!is.na(dgloess$all_LB),]$all_LB,]$GlobalEssentiality<-"Essential"
+temp<-dcol16[,which(colnames(dcol16) %nin% qw(Gene,Bnb,Essentiality,GlobalEssentiality))]
+temp1<-createEmptyDf(nrow=nrow(dcol16),ncol = 3,colnames = qw(mean,var,sd))
+temp1$mean<-rowMeans(as.matrix(temp),na.rm=T)
+temp1$var<-rowVars(as.matrix(temp),na.rm=T)
+temp1$sd<-rowSds(as.matrix(temp),na.rm=T)
+dcol16<-cbind(dcol16,temp1)
+
+mycolpal<-get_palette("lancet",2)
+p<-ggscatter(dcol16,x="mean",y="sd",alpha=0.2,size=0.3,
+          color="GlobalEssentiality",palette = rev(mycolpal),
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 10, label.y=2.7, label.sep = "\n",size=5),
+          legend.title="",legend="",
+          xlab="mRNA expression level [a.u.]",
+          ylab="Standard deviation [a.u.]")
+p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p
+Sys.time()
+```
+## 9.2. Quantile normalization and calc. transcriptional diversification through natural evolution (DMg)
+```{r Evo,warning=FALSE, message=FALSE,fig.height=3,fig.width=4,dpi=300}
+temp<-dcol16[,which(colnames(dcol16) %nin% qw(Gene,Bnb,Essentiality,GlobalEssentiality,mean,var,sd))]
+temp<-normalize.quantiles(as.matrix(temp))
+temp1<-createEmptyDf(nrow=nrow(dcol16),ncol = 3,colnames = qw(mean,var,sd))
+temp1$mean<-rowMeans(as.matrix(temp),na.rm=T)
+temp1$var<-rowVars(as.matrix(temp),na.rm=T)
+temp1$sd<-rowSds(as.matrix(temp),na.rm=T)
+dcol16.qnorm<-cbind(dcol16[,which(colnames(dcol16) %in% qw(Gene,Bnb,Essentiality,GlobalEssentiality))],temp,temp1)
+
+dcol16.qnorm<-dcol16.qnorm[order(dcol16.qnorm$mean),] # sorting 
+dcol16.qnorm<-transform(dcol16.qnorm,RunmedVar=runmed(dcol16.qnorm$sd,41),lmg=dcol16.qnorm$mean)
+lmgn<-data.frame(x=dcol16.qnorm$lmg,y=dcol16.qnorm$RunmedVar)
+sp<-smooth.spline(lmgn,df=12)
+x<-seq(min(lmgn$x),max(lmgn$x),length=1000)
+pred_col16<-as.data.frame(x)
+pred_col16<-transform(pred_col16,smsp=predict(sp,x)[2])
+colnames(pred_col16)<-c("x","smoothsp")
+pred2<-dcol16.qnorm$mean
+pred2<-transform(pred2,y=predict(sp,pred2)[2])
+colnames(pred2)<-c("x","smoothsp")
+dcol16.qnorm<-transform(dcol16.qnorm,SmoothSpline=pred2$smoothsp)
+dcol16.qnorm<-transform(dcol16.qnorm,DMg=dcol16.qnorm$sd-dcol16.qnorm$SmoothSpline) # calculate distance from smooth spline to SD 
+Sys.time()
+```
+
+## 9.3. Relationship between DMg and 
+```{r Evo,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=4,dpi=300}
+## Running median
+mycolpal<-get_palette("lancet",2)
+p1<-ggscatter(dcol16.qnorm,x="mean",y="sd",
+          color="GlobalEssentiality",palette = rev(mycolpal),
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 11, label.y=2.7, label.sep = "\n",size=5),
+          alpha = 0.5, size=0.3,legend="")+
+  labs(x="mRNA epression level [a.u]",y="Standard deviation [a.u.]")+
+  geom_line(data=dcol16.qnorm,aes(x=mean,y=RunmedVar), colour="magenta", size=0.5)+
+  geom_line(data=pred_col16,aes(x=x,y=smoothsp), colour="deepskyblue", size=1) +
+  geom_vline(xintercept = c(7,10),linetype=2,size=0.5)
+  # annotate("text",x=Inf,y=Inf,label="Smooth Spline", hjust = 1,vjust = 1, colour="deepskyblue")+
+  # annotate("text",x=Inf,y=Inf,label="Running Median", hjust = 1,vjust = 2.5, colour="magenta")
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+## Mean
+stat.result<-dcol16.qnorm %>% wilcox_test(mean ~ GlobalEssentiality)
+p2<-ggboxplot(dcol16.qnorm,
+            x="GlobalEssentiality",y="mean",
+         # fill="GlobalEssentiality",
+            color="GlobalEssentiality",palette = mycolpal,legend="",
+         outlier.shape = NA,
+            # add="jitter",add.params = list(size = 0.5, jitter = 0.25,alpha=0.1),
+            ylab="mRNA expression level [a.u.]",xlab="Gene essentiality in 16 strains")+
+  scale_y_continuous(breaks = get_breaks(by = 5, from = 0),limits =  c(0, 18))+
+  # stat_compare_means(label.y = 17)+
+  annotate("text",x=1,y=17,label=paste("Wilcoxon, p=",stat.result$p,sep=" "), hjust = 0.2,vjust = 0,size=5)+
+  annotate("text",x=1,y=15,label=paste(nrow(dcol16.qnorm[dcol16.qnorm$GlobalEssentiality=="Nonessential",])), hjust = 0.5,vjust = 0)+
+  annotate("text",x=2,y=15,label=paste(nrow(dcol16.qnorm[dcol16.qnorm$GlobalEssentiality=="Essential",])), hjust = 0.5,vjust = 0)
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+## Evolutionary variability of expression level
+### all
+stat.result<-dcol16.qnorm %>% wilcox_test(DMg ~ GlobalEssentiality)
+p3<-ggboxplot(dcol16.qnorm,
+            x="GlobalEssentiality",y="DMg",
+         # fill="GlobalEssentiality",
+            color="GlobalEssentiality",palette = mycolpal,legend="",
+         outlier.shape = NA,
+            # add="jitter",add.params = list(size = 0.5, jitter = 0.25,alpha=0.1),
+            ylab="Transcriptional variability [a.u.]",xlab="Gene essentiality in 16 strains")+
+  scale_y_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(-0.3, 1))+
+  # stat_compare_means(label.y = 0.95)+
+  annotate("text",x=1,y=0.95,label=paste("Wilcoxon, p=",stat.result$p,sep=" "), hjust = 0.2,vjust = 0,size=5)+
+  annotate("text",x=1,y=0.8,label=paste(nrow(dcol16.qnorm[dcol16.qnorm$GlobalEssentiality=="Nonessential",])), hjust = 0.5,vjust = 0)+
+  annotate("text",x=2,y=0.8,label=paste(nrow(dcol16.qnorm[dcol16.qnorm$GlobalEssentiality=="Essential",])), hjust = 0.5,vjust = 0)
+p3<-ggpar(p3,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p3
+
+stat.result<-dcol16.qnorm %>% wilcox_test(DMg ~ GlobalEssentiality)
+stat.result$p
+
+wilcox.test(dcol16.qnorm[dcol16.qnorm$GlobalEssentiality=="Essential",]$DMg,dcol16.qnorm[dcol16.qnorm$GlobalEssentiality=="Nonessential",]$DM,exact = F)
+
+### subset
+figtemp<-dcol16.qnorm[(dcol16.qnorm$mean<10)&(dcol16.qnorm$mean>7),]
+p4<-ggboxplot(figtemp,
+            x="GlobalEssentiality",y="DMg",
+         # fill="GlobalEssentiality",
+            color="GlobalEssentiality",palette = mycolpal,legend="",
+         outlier.shape = NA,
+            add="jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.2),
+            ylab="Transcriptional variability [a.u.]",xlab="Gene essentiality in 16 strains")+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(-0.3, 2.7))+
+  stat_compare_means(label.y = 2.5,size=5)+
+  annotate("text",x=1,y=2.1,label=paste(nrow(figtemp[(figtemp$GlobalEssentiality=="Nonessential"),])), hjust = 0.5,vjust = 0)+
+  annotate("text",x=2,y=2.1,label=paste(nrow(figtemp[(figtemp$GlobalEssentiality=="Essential"),])), hjust = 0.5,vjust = 0)
+stat.result<-figtemp %>% wilcox_test(DMg ~ GlobalEssentiality)
+stat.result$p
+p4<-ggpar(p4,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p4
+
+cor.test(x=figtemp$mean,y=figtemp$sd,method="spearman")
+
+Sys.time()
+
+# ggboxplot(dcol16.qnorm[(dcol16.qnorm$mean>9),],
+#             x="GlobalEssentiality",y="DMg",
+#          # fill="GlobalEssentiality",
+#             color="GlobalEssentiality",palette = mycolpal,legend="",
+#          outlier.shape = NA,
+#             add="jitter",add.params = list(size = 0.5, jitter = 0.2,alpha=0.1),
+#             ylab="Transcriptional variability [a.u.]",xlab="Gene essentiality in 16 strains")+
+#   scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(-0.3, 2.7))+
+#   stat_compare_means(label.y = 2.5)
+
+# ggerrorplot(dcol16.qnorm,
+#             x="Essentiality",y="DMg",
+#             desc_stat = "mean_sd",
+#             color="Essentiality",palette = mycolpal,legend="",
+#             add="jitter",add.params = list(size = 0.5, jitter = 0.25,alpha=0.1),
+#             ylab="Transcriptional variability [a.u.]",xlab="Gene essentiality in K12")+
+#   scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(-0.3, 2.7))+
+#   stat_compare_means(label.y = 2.5)
+#   
+# ggerrorplot(dcol16.qnorm,
+#             x="GlobalEssentiality",y="DMg",
+#             desc_stat = "mean_sd",
+#             color="GlobalEssentiality",palette = mycolpal,legend="",
+#             add="jitter",add.params = list(size = 0.5, jitter = 0.25,alpha=0.1),
+#             ylab="Transcriptional variability [a.u.]",xlab="Global gene essentiality")+
+#   scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(-0.3, 2.7))+
+#   stat_compare_means(label.y = 2.5)
+
+```
+# .
+# .
+# .
+# Other datasets
+# 10. Transcriptome analysis of various E. coli strains
+## https://doi.org/10.1093/molbev/msw105
+### Table S9
+```{r Length,warning=FALSE, message=FALSE,fig.height=3,fig.width=4,dpi=300}
+divcol<-paste(getwd(),"msw105_Supplementary_Data","TableS9.csv",sep="/") %>%
+  read_csv()
+divcol_info<-paste(getwd(),"msw105_Supplementary_Data","TableS9_info.csv",sep="/") %>%
+  read_csv()
+divcol_info$Condition<-str_sub(divcol_info$Name, start = 1, end = 2) 
+divcol_info$mean_col<-paste(divcol_info$Medium,"_mean",sep="")
+divcol_info$var_col<-paste(divcol_info$Medium,"_var",sep="")
+
+# quantile normalization
+divcol[,2:ncol(divcol)]<-normalize.quantiles(as.matrix(divcol[,2:ncol(divcol)]))
+divcol<-left_join(divcol,dgnw3110[,which(colnames(dgnw3110) %in% qw(Name,Bnb))],by=c("Gene"="Name"))
+temp1<-divcol[!is.na(divcol$Bnb),]
+temp2<-divcol[is.na(divcol$Bnb),which(colnames(divcol)!="Bnb")]
+my_tmp<-dBnbtoEntrezID %>% select(Gene,Bnb)
+temp2<-left_join(temp2,my_tmp,by="Gene")
+divcol<-bind_rows(temp1,temp2)
+divcol<-left_join(divcol,dgnw3110[,which(colnames(dgnw3110) %in% qw(Bnb,Essentiality))],by="Bnb")
+divcol[is.na(divcol$Essentiality),]$Essentiality<-"Nonessential"
+
+divcol2<-divcol[,which(colnames(divcol) %in% qw(Gene,Bnb,Essentiality))]
+temp<-createEmptyDf(nrow=nrow(divcol2),ncol=length(unique(divcol_info$Condition)),colnames = unique(divcol_info$Condition))
+for(i in 1:ncol(temp)){
+  temp1<-divcol[,which(colnames(divcol) %in% divcol_info[divcol_info$Condition==colnames(temp)[i],]$Name)]
+  temp[,i]<-rowMeans(as.matrix(temp1),na.rm=T)
+}
+divcol2<-cbind(divcol2,temp)
+
+temp1<-paste(rep(unique(divcol_info$Medium),each=2),rep(c("_mean","_var"),length(unique(divcol_info$Medium))),sep="")
+temp<-createEmptyDf(nrow=nrow(divcol2),ncol=length(temp1),colnames = temp1)
+temp2<-unique(divcol_info$Medium)
+i<-1
+for(i in 1:length(temp2)){
+  temp3<-unique(divcol_info[divcol_info$Medium==temp2[i],]$Condition)
+  temp4<-divcol2[,which(colnames(divcol2) %in% temp3)]
+  temp[,which(colnames(temp)==divcol_info[divcol_info$Medium==temp2[i],]$mean_col[1])]<-rowMeans(as.matrix(temp4),na.rm=T)
+  temp[,which(colnames(temp)==divcol_info[divcol_info$Medium==temp2[i],]$var_col[1])]<-rowVars(as.matrix(temp4),na.rm=T)
+}
+temp$mean<-rowMeans(as.matrix(temp[,which(colnames(temp) %in% unique(divcol_info$mean_col))]),na.rm=T)
+temp$var<-rowMeans(as.matrix(temp[,which(colnames(temp) %in% unique(divcol_info$var_col))]),na.rm=T)
+temp$sd<-sqrt(rowSums(as.matrix(temp$var),na.rm=T)) 
+
+divcol2<-cbind(divcol2,temp)
+
+mycolpal<-get_palette("lancet",2)
+ggscatter(divcol2,x="mean",y="sd",alpha=0.2,size=0.3,
+          color="Essentiality",palette = rev(mycolpal),
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 7, label.y=2.5, label.sep = "\n"),
+          legend.title="",legend="right",
+          xlab="mRNA expression level [a.u.]",
+          ylab="Standard deviation [a.u.]")
+
+ggboxplot(divcol2,x="Essentiality",y="sd")
+
+ggscatter(divcol,x="SG3",y="SG2",alpha=0.2,size=0.3,color="Essentiality",palette = rev(mycolpal),
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 7, label.sep = "\n"))+
+  geom_abline(slope = 1,intercept = 0)
+
+```
+### Table S11 (Standardized data)
+```{r Length,warning=FALSE, message=FALSE,fig.height=3,fig.width=4,dpi=300}
+divcol.S11<-paste(getwd(),"msw105_Supplementary_Data","TableS11.csv",sep="/") %>%
+  read_csv()
+divcol2.S11<-left_join(divcol2[,which(colnames(divcol2) %in% qw(Gene,Bnb,Essentiality))],divcol.S11,by="Gene")
+
+temp1<-paste(rep(unique(divcol_info$Medium),each=2),rep(c("_mean","_var"),length(unique(divcol_info$Medium))),sep="")
+temp<-createEmptyDf(nrow=nrow(divcol2.S11),ncol=length(temp1),colnames = temp1)
+temp2<-unique(divcol_info$Medium)
+i<-1
+for(i in 1:length(temp2)){
+  temp3<-unique(divcol_info[divcol_info$Medium==temp2[i],]$Condition)
+  temp4<-divcol2.S11[,which(colnames(divcol2.S11) %in% temp3)]
+  temp[,which(colnames(temp)==divcol_info[divcol_info$Medium==temp2[i],]$mean_col[1])]<-rowMeans(as.matrix(temp4),na.rm=T)
+  temp[,which(colnames(temp)==divcol_info[divcol_info$Medium==temp2[i],]$var_col[1])]<-rowVars(as.matrix(temp4),na.rm=T)
+}
+temp$mean<-rowMeans(as.matrix(temp[,which(colnames(temp) %in% unique(divcol_info$mean_col))]),na.rm=T)
+temp$var<-rowMeans(as.matrix(temp[,which(colnames(temp) %in% unique(divcol_info$var_col))]),na.rm=T)
+temp$sd<-sqrt(rowSums(as.matrix(temp$var),na.rm=T)) 
+
+divcol2.S11<-cbind(divcol2.S11,temp)
+
+mycolpal<-get_palette("lancet",2)
+ggscatter(divcol2.S11,x="mean",y="sd",alpha=0.2,size=0.3,
+          color="Essentiality",palette = rev(mycolpal),
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          # cor.coeff.args = list(method = "spearman", label.x = 7, label.y=2.5, label.sep = "\n"),
+          legend.title="",legend="right",
+          xlab="mRNA expression level [a.u.]",
+          ylab="Standard deviation [a.u.]")
+
+ggboxplot(divcol2.S11,x="Essentiality",y="sd")+stat_compare_means()
+
+temp<-pivot_longer(divcol2.S11,cols = unique(divcol_info$var_col),names_to = "var_cond_name",values_to = "var_cond")
+
+ggboxplot(temp,x="var_cond_name",y="var_cond",color = "Essentiality")
+ggerrorplot(temp,x="var_cond_name",y="var_cond",color = "Essentiality")
+```
+

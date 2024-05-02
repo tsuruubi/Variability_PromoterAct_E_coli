@@ -1,0 +1,197 @@
+---
+title: "Analysis of FlowData (CSV format) "
+author: "Tsuru"
+date: "2022/8/16"
+output: html_document
+---
+
+This script should be executed after conversion of flow data from FSC format to CSV format.
+This script codes for manipulation of flow data (csv) to extract:
+Mean expression levels for both wild and mutatnt types
+Mutational effects
+Number of cells filtered
+
+
+# 0. General settings
+## 0.1. Library loading
+```{r General,warning=FALSE, message=FALSE}
+library(ggplot2)
+library(scales)
+library(ggpubr)
+library(gridExtra)
+library(dplyr)
+library(matrixStats)
+library(RColorBrewer)
+library(openxlsx)
+library(readxl)
+library(ggsci)
+library(tidyverse)
+library(magrittr)
+library(rstatix)
+library(stringr)
+Sys.time()
+```
+
+## 0.2. versatile user functions
+The [qw](https://ja.coder.work/so/r/240447) function in Perl.  
+The [createEmptyDf](https://htsuda.net/archives/2560) function.
+The [g_legend](https://github.com/hadley/ggplot2/wiki/Share-a-legend-between-two-ggplot2-graphs) function to extract legend.
+```{r General}
+qw <- function(...) {
+  sapply(match.call()[-1], deparse)
+}
+
+createEmptyDf = function( nrow, ncol, colnames = c() ){
+  data.frame( matrix( vector(), nrow, ncol, dimnames = list( c(), colnames ) ) )
+}
+Sys.time()
+```
+
+## 0.3. visualization
+```{r General}
+my_fontsize<-16
+Sys.time()
+```
+
+# 1. Analysis of flow data (csv)
+## 1.1. load mg1655 data and define autofluorescence and FSC gate
+```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.5,dpi=300}
+dmeta<-paste(getwd(),"Meta","metadata.xlsx",sep="/") %>%
+  read_xlsx()
+my_volume<-"/Volumes/DailyUse"
+my_path<-paste(my_volume,"Hatanaka","FlowData","CSV","MG1655.csv",sep="/")
+autofl<-my_path %>% read_csv()
+autofl$log10FSCpls3<-log10(autofl$FSC+1000)
+# fscmode<-as.numeric(names(which.max(table(autofl$log10FSCpls3))))
+hist_info <- hist(autofl$log10FSCpls3,plot=F,breaks = seq(2.5,5.5,0.01))               # Extract histogram information
+
+# Calc. mode of FSC
+fscmode<-hist_info$breaks[which(hist_info$density==max(hist_info$densit))]
+paste("Mode of FSC:",fscmode) %>%
+print()
+
+# upper and lower limit of FSC gate
+fsc_low<-3.675
+fsc_high<-3.864
+
+round(nrow(autofl[(autofl$log10FSCpls3>fsc_low)&(autofl$log10FSCpls3<fsc_high),])/nrow(autofl)*100) %>%
+  paste(.,"% of cells remains",sep="") %>%
+  print()
+
+
+p1<-gghistogram(autofl,x="log10FSCpls3",y="density",fill="gray10",size=0,bins=50)+
+  xlab(expression(log[10]~"FSC [a.u.]"))+
+  ylab("Relative frequency [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 3),limits =  c(2.7, 5.5))+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0, 2.5))+
+  geom_vline(xintercept = fscmode,size=0.2,linetype=2)+
+  geom_vline(xintercept = c(fsc_low,fsc_high),size=0.2,linetype=2,color=get_palette("lancet",2)[2])
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+# Define autofluorescence
+autofl.th<-quantile(autofl[(autofl$log10FSCpls3>fsc_low)&(autofl$log10FSCpls3<fsc_high),]$FITC,0.995) 
+
+p2<-gghistogram(autofl,x="FITC",y="density",fill = "gray10", size=0,bins=50,
+            xlab="Green FI [a.u.]",
+            ylab="Relative frequency [a.u.]")+
+  scale_x_continuous(breaks = get_breaks(by = 500, from = 0),limits =  c(-300, 1100))+
+  scale_y_continuous(breaks = get_breaks(by = 0.002, from = 0),limits =  c(0, 0.0045))+
+  geom_vline(xintercept = autofl.th,size=0.2,linetype=2,color=get_palette("lancet",2)[2])
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+rm(autofl)
+Sys.time()
+```
+
+## 1.2. density plot of Green FI for all strains
+```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=2,fig.width=16,dpi=300}
+my_tmp<-dmeta[(!is.na(dmeta$Used))&(!is.na(dmeta$Genotype))&(!is.na(dmeta$Type)),]
+mylist<-unique(my_tmp[(my_tmp$Used=="Yes")&(my_tmp$Genotype=="wild type")&(my_tmp$Type=="Promoter"),]$Promoter_Name)
+my_df<-data.frame(Promoter_Name=mylist,WT_exprs=NA,MT_exprs=NA,
+                  WT_sd=NA,MT_sd=NA,
+                  logFC=NA,WT_NbCells=NA,MT_NbCells=NA)
+figlist<-list()
+for(i in 1:length(mylist)){
+  
+  ddw<-dmeta[(dmeta$Promoter_Name %in% mylist[i])&(dmeta$Genotype=="wild type"),]$CSV_filename_new
+  ddm<-dmeta[(dmeta$Promoter_Name %in% mylist[i])&(dmeta$Genotype=="mutant library"),]$CSV_filename_new
+  dw<-paste(my_volume,"Hatanaka","FlowData","CSV",ddw,sep="/") %>%
+    read_csv()
+  dw$Name<-"WT"
+  dm<-paste(my_volume,"Hatanaka","FlowData","CSV",ddm,sep="/") %>%
+    read_csv()
+  dm$Name<-"Mut"
+  dwm<-bind_rows(dm,dw)
+  dwm<-dwm[dwm$FSC>-999,]
+  dwm$log10FSCpls3<-log10(dwm$FSC+1000)
+  dwm$FITCsbt<-dwm$FITC-autofl.th
+  dwm$log10FITCnorm<-ifelse(dwm$FITCsbt>0,log10(dwm$FITCsbt),NA)
+  dwm<-dwm[!is.na(dwm$log10FITCnorm),]
+  dwm<-dwm[(dwm$log10FSCpls3>fsc_low)&(dwm$log10FSCpls3<fsc_high)&(dwm$PE<1000),]
+  dwm$Name<-factor(dwm$Name,levels=qw(WT,Mut))
+  
+  my_df$WT_exprs[i]<-mean(dwm[dwm$Name=="WT",]$log10FITCnorm)
+  my_df$MT_exprs[i]<-mean(dwm[dwm$Name=="Mut",]$log10FITCnorm)
+  my_df$WT_sd[i]<-sd(dwm[dwm$Name=="WT",]$log10FITCnorm)
+  my_df$MT_sd[i]<-sd(dwm[dwm$Name=="Mut",]$log10FITCnorm)
+  my_df$logFC[i]<-my_df$MT_exprs[i]-my_df$WT_exprs[i]
+  my_df$WT_NbCells[i]<-nrow(dwm[dwm$Name=="WT",])
+  my_df$MT_NbCells[i]<-nrow(dwm[dwm$Name=="Mut",])
+  
+  g<-gghistogram(dwm,x="log10FITCnorm",y="density", size=0,bins=50,alpha=0.4,
+            legend="",legend.title="",
+            # add="mean", add.params = list(size=0.5,linetype=5),
+            color="Name",fill="Name",palette = c("#00AFBB","#D870AD"),
+            xlab="",ylab="",subtitle=mylist[i]
+            # xlab=expression(log[10]~"Green FI [a.u.]"),
+            # ylab="Relative frequency [a.u.]"
+            )+
+    # annotate("text",x=-Inf,y=Inf,label= mylist[i],hjust = -0.2,vjust = 1,size=5)+
+    scale_x_continuous(breaks = get_breaks(by = 1, from = 1),limits =  c(1, 5))
+    
+    my_gb<-ggplot_build(g)
+    my_max<-max(my_gb$data[[1]]$density)
+    if(my_max<2){
+      g<-g+scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits = c(0,2))
+    }else{
+      g<-g+scale_y_continuous(breaks = get_breaks(by = 1, from = 0))
+    }
+  g<-ggpar(g,font.tickslab =c(15),font.subtitle = c(20))
+  figlist[[i]]<-g
+}
+
+rm(dw,dm,dwm,g)
+
+# k<-1
+# for(l in 1:8){
+#   if(l<=7){
+#     grid.arrange(figlist[[k+1]],figlist[[k+2]],figlist[[k+3]],figlist[[k+4]],figlist[[k+5]],figlist[[k+6]],figlist[[k+7]],figlist[[k+8]],figlist[[k+9]],figlist[[k+10]],nrow=1)
+#     k<-k+10
+#   }else{
+#     grid.arrange(figlist[[1]],figlist[[2]],ncol=10)
+#   }
+# }
+
+k<-0
+for(l in 1:9){
+    grid.arrange(figlist[[k+1]],figlist[[k+2]],figlist[[k+3]],figlist[[k+4]],figlist[[k+5]],figlist[[k+6]],figlist[[k+7]],figlist[[k+8]],nrow=1)
+    k<-k+8
+}
+rm(figlist)
+Sys.time()
+```
+## Output
+```{r Generic_prop,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+# write_csv(x = my_df,file = paste(getwd(),"Stats_of_FlowData","flowstats.csv",sep="/"))
+Sys.time()
+```
+
+
+## Check
+```{r Generic_prop,warning=FALSE, message=FALSE,fig.height=3,fig.width=3,dpi=300}
+ggscatter(my_df,x="WT_exprs",y="MT_exprs",alpha=0.5)+
+  geom_abline(slope = 1,intercept = 0)
+Sys.time()
+```
