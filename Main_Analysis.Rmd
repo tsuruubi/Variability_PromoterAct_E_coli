@@ -2473,14 +2473,20 @@ p2<-ggpar(p2,font.xtickslab = c(size=0))
 p2
 ```
 # 13. Analysis of flow data (csv)
+Execute FCS2CSV.Rmd in the Zenodo folder in advance.
+Make sure the presence of the CSV files in Zenodo/CSV/.
 ## 13.1. load mg1655 data
 ```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.5,dpi=300}
 # upper and lower limit of FSC gate
 fsc_low<-3.675
 fsc_high<-3.864
 
-# path to CSV
-ddflowcsvs<-paste(my_volume,"Hatanaka/FlowData/CSV/",sep="/")
+# path to CSV (private)
+# ddflowcsvs<-paste(my_volume,"Hatanaka/FlowData/CSV",sep="/")
+
+# path to CSV (public) 
+ddflowcsvs<-paste(getwd(),"Zenodo/CSV",sep="/")
+
 
 autofl<-paste(ddflowcsvs,"MG1655.csv",sep = "/") %>%
   read_csv()
