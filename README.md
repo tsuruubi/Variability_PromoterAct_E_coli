@@ -1,6 +1,7 @@
 # Mutational Variability in E. coli　 promoters
 
 ## Descriptions of folders
+Zenodo: codes for conversion of file format from fcs to csv. Download the fcs files from the Zenodo repository (WT for https://doi.org/10.5281/zenodo.11108555; MT for https://doi.org/10.5281/zenodo.11108786) and place them into either Zenodo/FCS/WT (for WT) or Zenodo/FCS/MT (for MT) in advance.  
 ENV_DataSet: the Env dataset comprising of transcriptome profiles (PRECISE 2.0) obtained from iModulonDB (http://imodulondb.org/)  
 EVO_DataSet: the Evo dataset comprising of transcriptome profiles obtained from Rousset et al (https://doi.org/10.1038/s41564-020-00839-y)  
 MUT_DataSet: the Mut dataset comprising of transcriptome profiles of our MA experiment  
