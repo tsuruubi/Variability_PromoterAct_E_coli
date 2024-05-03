@@ -1,0 +1,51 @@
+---
+title: "FCS format to CSV format"
+author: "Tsuru"
+date: "2022/8/16"
+output: html_document
+---
+
+# 0. General settings
+## 0.1. Library loading
+```{r General,warning=FALSE, message=FALSE}
+library(flowCore)
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(magrittr)
+Sys.time()
+```
+
+## 0.2. versatile user functions
+The [qw](https://ja.coder.work/so/r/240447) function in Perl.  
+The [createEmptyDf](https://htsuda.net/archives/2560) function.
+The [g_legend](https://github.com/hadley/ggplot2/wiki/Share-a-legend-between-two-ggplot2-graphs) function to extract legend.
+```{r General}
+qw <- function(...) {
+  sapply(match.call()[-1], deparse)
+}
+
+createEmptyDf = function( nrow, ncol, colnames = c() ){
+  data.frame( matrix( vector(), nrow, ncol, dimnames = list( c(), colnames ) ) )
+}
+Sys.time()
+```
+
+```{r Generic_prop,warning=FALSE, message=FALSE,fig.height=1.2,fig.width=1.2,dpi=300}
+getwd()
+fileinfo<-paste(getwd(),"metadata.xlsx",sep = "/") %>%
+  read_xlsx()
+i<-1
+for(i in 145:nrow(fileinfo)){
+  my_path<-paste(getwd(),fileinfo$Folder_FCS[i],fileinfo$FCS_filename[i],sep="/")
+  my_fcs<-my_path %>% read.FCS()
+  my_df<-my_fcs@exprs %>% data.frame()
+  my_df<-my_df%>%select(FSC.A,SSC.A,FITC.A,PE.A)
+  colnames(my_df)<-qw(FSC,SSC,FITC,PE)
+  my_df<-round(my_df,digits = 2)
+  my_out<-paste(getwd(),"CSV",fileinfo$CSV_filename_new[i],sep = "/")
+  write_csv(x = my_df, file = my_out)
+}
+Sys.time()
+```
