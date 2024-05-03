@@ -61,9 +61,9 @@ Make sure the presence of the CSV files in Zenodo/CSV/.
 dmeta<-paste(getwd(),"Meta","metadata.xlsx",sep="/") %>%
   read_xlsx()
 # private path
-my_volume<-"/Volumes/DailyUse"
-my_path<-paste(my_volume,"Hatanaka","FlowData","CSV",sep="/")
-my_path_af<-paste(my_volume,"Hatanaka","FlowData","CSV","MG1655.csv",sep="/")
+# my_volume<-"/Volumes/DailyUse"
+# my_path<-paste(my_volume,"Hatanaka","FlowData","CSV",sep="/")
+# my_path_af<-paste(my_volume,"Hatanaka","FlowData","CSV","MG1655.csv",sep="/")
 
 # public path
 my_path<-paste(getwd(),"Zenodo","CSV",sep="/")
