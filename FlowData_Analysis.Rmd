@@ -54,13 +54,23 @@ Sys.time()
 ```
 
 # 1. Analysis of flow data (csv)
+Execute FCS2CSV.Rmd in the Zenodo folder in advance.
+Make sure the presence of the CSV files in Zenodo/CSV/.
 ## 1.1. load mg1655 data and define autofluorescence and FSC gate
 ```{r Flow_Cytometry,warning=FALSE, message=FALSE,fig.height=3.5,fig.width=3.5,dpi=300}
 dmeta<-paste(getwd(),"Meta","metadata.xlsx",sep="/") %>%
   read_xlsx()
+# private path
 my_volume<-"/Volumes/DailyUse"
-my_path<-paste(my_volume,"Hatanaka","FlowData","CSV","MG1655.csv",sep="/")
-autofl<-my_path %>% read_csv()
+my_path<-paste(my_volume,"Hatanaka","FlowData","CSV",sep="/")
+my_path_af<-paste(my_volume,"Hatanaka","FlowData","CSV","MG1655.csv",sep="/")
+
+# public path
+my_path<-paste(getwd(),"Zenodo","CSV",sep="/")
+my_path_af<-paste(getwd(),"Zenodo","CSV","MG1655.csv",sep="/")
+
+
+autofl<-my_path_af %>% read_csv()
 autofl$log10FSCpls3<-log10(autofl$FSC+1000)
 # fscmode<-as.numeric(names(which.max(table(autofl$log10FSCpls3))))
 hist_info <- hist(autofl$log10FSCpls3,plot=F,breaks = seq(2.5,5.5,0.01))               # Extract histogram information
@@ -117,10 +127,10 @@ for(i in 1:length(mylist)){
   
   ddw<-dmeta[(dmeta$Promoter_Name %in% mylist[i])&(dmeta$Genotype=="wild type"),]$CSV_filename_new
   ddm<-dmeta[(dmeta$Promoter_Name %in% mylist[i])&(dmeta$Genotype=="mutant library"),]$CSV_filename_new
-  dw<-paste(my_volume,"Hatanaka","FlowData","CSV",ddw,sep="/") %>%
+  dw<-paste(my_path,ddw,sep="/") %>%
     read_csv()
   dw$Name<-"WT"
-  dm<-paste(my_volume,"Hatanaka","FlowData","CSV",ddm,sep="/") %>%
+  dm<-paste(my_path,ddm,sep="/") %>%
     read_csv()
   dm$Name<-"Mut"
   dwm<-bind_rows(dm,dw)
