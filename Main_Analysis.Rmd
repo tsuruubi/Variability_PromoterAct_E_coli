@@ -2621,7 +2621,7 @@ Sys.time()
 ```
 # 14. Supplementary table
 ```{r Tables,warning=FALSE, message=FALSE,fig.height=20,fig.width=40,dpi=300}
-my_df<-df_stats %>% select(Promoter_Name,Category,Gene_name,Length,GC_ratio,WT_exprs,MT_exprs,logFC,Sequence)
+my_df<-df_stats %>% select(Promoter_Name,Category,Gene_name,Length,GC_ratio,WT_exprs,MT_exprs,logFC,norm.logFC,WT_sd,MT_sd,norm_WT_sd,norm_MT_sd,MVprm,Sequence)
 # my_df<-df_stats %>% select(Promoter_Name,Category,Gene_name,Length,GC_ratio,WT_exprs,MT_exprs,logFC,Bnb)
 # my_tmp<-dcol16.qnorm %>% select(Bnb,DMevo)
 # my_df<-left_join(my_df, my_tmp)
@@ -2636,7 +2636,7 @@ my_df$GC_ratio<-round(my_df$GC_ratio,digits = 3)
 my_df$WT_exprs<-round(my_df$WT_exprs,digits = 2)
 my_df$MT_exprs<-round(my_df$MT_exprs,digits = 2)
 my_df$logFC<-round(my_df$logFC,digits = 3)
-colnames(my_df)<-c("Promoter Name","Category","Gene","Length (bp)","GC Ratio","Expression level of WT","Expression level of MT","Differential expression","Sequence","Downstream essential genes")
+colnames(my_df)<-c("Promoter Name","Category","Gene","Length (bp)","GC Ratio","Expression level of WT","Expression level of MT","Log10 Fold Change","Compensated log10 Fold Change","SD of WT","SD of MT","Compensated SD of WT","Compensated SD of MT","MVprm","Sequence","Downstream essential genes")
 
 my_tmp<-df_reg %>% select(Promoter_Name,Regulator,act,inh)
 my_tmp<-my_tmp[!is.na(my_tmp$Regulator),]
@@ -2646,7 +2646,6 @@ my_df<-left_join(my_df, my_tmp)
 
 my_df<-my_df %>% select(everything(),-`Expression level of WT`,`Expression level of WT`)
 my_df<-my_df %>% select(everything(),-`Expression level of MT`,`Expression level of MT`)
-my_df<-my_df %>% select(everything(),-`differential expression`,`differential expression`)
 my_df<-my_df %>% select("Promoter Name","Category","Gene","Downstream essential genes",everything())
 my_df<-my_df[order(my_df$Category,decreasing = T),]
 
