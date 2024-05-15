@@ -851,7 +851,114 @@ p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,
 p1
 Sys.time()
 ```
+## 3.8. Comparison of expression levels between transcriptome and promoter activity
+```{r Toxicity,warning=FALSE, message=FALSE,fig.height=3,fig.width=3.5,dpi=300}
+my_tmp<-dat_tpm_env %>% select(Bnb,control__wt_glc__1,control__wt_glc__2)
+my_tmp$wt_glc_env<-rowMeans(as.matrix(my_tmp[,c(2,3)]))
+my_tmp<-my_tmp %>% select(Bnb,wt_glc_env)
+my_df<-df_stats[df_stats$Category %in% qw(Ess,Nes),]
+my_df<-left_join(my_df,my_tmp)
+my_tmp<-df_env %>% select(Bnb,MEANenv,DMenv)
+my_df<-left_join(my_df,my_tmp)
 
+mycolpal<-get_palette("lancet",2)
+p1<-ggscatter(my_df,x="WT_exprs",y="wt_glc_env",alpha=0.5,size=2,
+            color="Category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 1.8,label.y=14, label.sep = "\n",size=5),
+          xlab="Mean FI (WT) [a.u.]",
+          legend.title="",legend="")+
+  ylab(expression(atop(log[2]~"mRNA", paste("expression level [a.u.]"))))+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.6, 4.5))+
+  scale_y_continuous(breaks = get_breaks(by = 4, from = 0),limits =  c(0,16))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+p2<-ggscatter(my_df,x="WT_exprs",y="MEANenv",alpha=0.5,size=2,
+            color="Category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 1.8,label.y=14, label.sep = "\n",size=5),
+          xlab="Mean FI (WT) [a.u.]",
+          legend.title="",legend="")+
+  ylab(expression(atop(log[2]~"mRNA", paste("expression level [a.u.]"))))+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.6, 4.5))+
+  scale_y_continuous(breaks = get_breaks(by = 4, from = 0),limits =  c(0,16))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+Sys.time()
+```
+## 3.9. Comparison of expression levels between transcriptome and promoter activity
+https://doi.org/10.1371/journal.pgen.1002443
+```{r Toxicity,warning=FALSE, message=FALSE,fig.height=3,fig.width=3.5,dpi=300}
+df_prm_noise<-paste(getwd(),"Promoter_Noise","pgen.1002443.s010.xls",sep="/") %>%
+  read_xls(range = "A1:F1833")
+colnames(df_prm_noise)[1]<-"Bnb"
+df_prm_noise[df_prm_noise$mean.gfp=="NA",]$mean.gfp<-NA
+df_prm_noise[df_prm_noise$sd.gfp=="NA",]$sd.gfp<-NA
+df_prm_noise[df_prm_noise$noise=="NA",]$noise<-NA
+
+my_df<-df_env %>% select(Bnb,MEANenv,DMenv,Essentiality)
+my_df$PresAbs<-"Absence"
+my_df[my_df$Bnb %in% df_prm_noise$Bnb,]$PresAbs<-"Presence"
+# my_df[my_df$Bnb %in% df_prm_noise[!is.na(df_prm_noise$mean.gfp),]$Bnb,]$PresAbs<-"Presence"
+my_df$PresAbs<-factor(my_df$PresAbs,levels = qw(Presence,Absence))
+my_df$Essentiality<-factor(my_df$Essentiality,levels=qw(Nonessential, Essential))
+
+mycolpal<-get_palette("lancet",2)
+p1<-ggboxplot(my_df,x="PresAbs",y="MEANenv",
+              color="Essentiality",palette = mycolpal,
+          add="jitter",add.params = list(alpha=0.1,size=0.1),
+          xlab="Silander et al",legend="")+
+  scale_y_continuous(breaks = get_breaks(by = 4, from = 0),limits =  c(0,16))+
+  ylab(expression(atop(log[2]~"mRNA", paste("expression level [a.u.]"))))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+my_tmp<-dgnw3110 %>% select(Bnb,Essentiality)
+df_prm_noise<-left_join(df_prm_noise,my_tmp)
+df_prm_noise$PrsAbs<-"Unused"
+df_prm_noise[df_prm_noise$Bnb %in% df_stats[!is.na(df_stats$Bnb),]$Bnb,]$PrsAbs<-"Used"
+df_prm_noise$PrsAbs<-factor(df_prm_noise$PrsAbs,levels = qw(Used,Unused))
+
+p1<-ggboxplot(df_prm_noise,x="PrsAbs",y="mean.log.gfp",
+              # color="Essentiality",palette = mycolpal,
+          add="jitter",add.params = list(alpha=0.1,size=1),
+          xlab="",legend="")+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0,2.5))+
+  ylab(expression(atop("Mean FI (WT) [a.u.]", paste("in Silander et al."))))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+my_df<-df_prm_noise[df_prm_noise$PrsAbs=="Used",]
+my_tmp<-df_stats %>% select(Bnb,Category,WT_exprs)
+my_df<-left_join(my_df,my_tmp)
+
+# Mean expression levels of WT in Silander et al used in this study
+p1<-ggboxplot(my_df,x="Category",y="mean.log.gfp",
+              color="Category",palette = mycolpal,
+          add="jitter",add.params = list(alpha=0.5,size=1),
+          xlab="Promoters",legend="")+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0,2.5))+
+  ylab(expression(atop("Mean FI (WT) [a.u.]", paste("in Silander et al."))))
+p1<-ggpar(p1,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p1
+
+
+# Correlation of Mean expression levels of WT between this study and Silander et al.
+p2<-ggscatter(my_df,x="WT_exprs",y="mean.log.gfp",
+              alpha=0.5,size=2,
+              color="Category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 2,label.y=2, label.sep = "\n",size=5),
+          xlab="Mean FI (WT) [a.u.]",legend="")+
+  scale_y_continuous(breaks = get_breaks(by = 1, from = 0),limits =  c(0,2.5))+
+  ylab(expression(atop("Mean FI (WT) [a.u.]", paste("in Silander et al."))))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+Sys.time()
+```
 
 # 4. Transcriptome profiles of natural isolates of E. coli (EVO Dataset)
 https://www.nature.com/articles/s41564-020-00839-y#MOESM4
@@ -1149,8 +1256,9 @@ p<-ggerrorplot(my_df,x="Category",y="DMevo",alpha=0.5,size=0.5,
   stat_compare_means(label.y = 0.7,size=5)
 p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
 p
-
+Sys.time()
 ```
+
 # 5. Transcriptome profiles of the mutant strains in the MA experiment cultured under a single environmental condition (MUT Dataset)
 ## 5.1. Load transcriptome dataset
 Raw data was plotted.
@@ -1369,6 +1477,28 @@ p<-ggpar(p,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,fo
 p
 
 ```
+## 3.8. Comparison of expression levels between transcriptome and promoter activity
+```{r Toxicity,warning=FALSE, message=FALSE,fig.height=3,fig.width=3.5,dpi=300}
+my_df<-df_stats[df_stats$Category %in% qw(Ess,Nes),]
+my_tmp<-df_mut %>% select(Bnb,MEANmut,DMmut)
+my_df<-left_join(my_df,my_tmp)
+
+mycolpal<-get_palette("lancet",2)
+p2<-ggscatter(my_df,x="WT_exprs",y="MEANmut",alpha=0.5,size=2,
+            color="Category",palette = mycolpal,
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "spearman", label.x = 1.8,label.y=14, label.sep = "\n",size=5),
+          xlab="Mean FI (WT) [a.u.]",
+          legend.title="",legend="")+
+  ylab(expression(atop(log[2]~"mRNA", paste("expression level [a.u.]"))))+
+  scale_x_continuous(breaks = get_breaks(by = 1, from = 2),limits =  c(1.6, 4.5))+
+  scale_y_continuous(breaks = get_breaks(by = 4, from = 0),limits =  c(0,16))
+p2<-ggpar(p2,font.y=my_fontsize,font.x=my_fontsize,font.xtickslab = my_fontsize,font.ytickslab = my_fontsize)
+p2
+
+Sys.time()
+```
+
 # 6. Transcriptional regulation
 ## 6.1. Count number of transcriptional regulations by TFs and sigmas
 Effect: +: activation +1
@@ -2163,9 +2293,12 @@ for(i in 1:length(intrcpt)){
   tempx[[i]]<-tempx[[i]][order(tempx[[i]]$expression),]
   tempx[[i]]$Runmed<-runmed(tempx[[i]]$muteffect,101)
   g<-ggscatter(tempx[[i]],x="expression",y="muteffect",
-               color = my_colorpl_category[i],alpha=0.1,size=0.2,xlim=c(0,1.2),ylim=c(-0.4,0.4),
+               color = my_colorpl_category[i],alpha=0.05,size=0.2,xlim=c(0,1.2),ylim=c(-0.4,0.4),
                xlab="Expression level [a.u.]", ylab="Mutational Change [a.u.]")+
     scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1.2)) +
+    geom_segment(aes(x = 0.5, xend = 0.5, y = -0.5, yend = 0.3),size=0.5)+
+    # geom_vline(xintercept = 0.5)+
+    geom_hline(yintercept = 0,size=0.5)+
     geom_line(aes(x=expression,y=Runmed),color = my_colorpl_category[i])+
     annotate("text",x=Inf,y=Inf,label=paste("Fb=",intrcpt[i],sep=" "), hjust = 1,vjust = 1,size=7)
   g<-ggpar(g,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))+
