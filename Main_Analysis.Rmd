@@ -2296,9 +2296,9 @@ for(i in 1:length(intrcpt)){
                color = my_colorpl_category[i],alpha=0.05,size=0.2,xlim=c(0,1.2),ylim=c(-0.4,0.4),
                xlab="Expression level [a.u.]", ylab="Mutational Change [a.u.]")+
     scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1.2)) +
-    geom_segment(aes(x = 0.5, xend = 0.5, y = -0.5, yend = 0.3),size=0.5)+
+    geom_segment(aes(x = 0.5, xend = 0.5, y = -0.5, yend = 0.3),size=0.5,linetype=2)+
     # geom_vline(xintercept = 0.5)+
-    geom_hline(yintercept = 0,size=0.5)+
+    geom_hline(yintercept = 0,size=0.5,linetype=2)+
     geom_line(aes(x=expression,y=Runmed),color = my_colorpl_category[i])+
     annotate("text",x=Inf,y=Inf,label=paste("Fb=",intrcpt[i],sep=" "), hjust = 1,vjust = 1,size=7)
   g<-ggpar(g,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))+
@@ -2461,6 +2461,8 @@ for(i in 1:length(intrcpt_nk)){
   g<-ggscatter(tempx[[i]],x="expression",y="muteffect",color = my_colorpl_category[i],alpha=0.1,size=0.2,xlim=c(0,1),ylim=c(-0.4,0.4),
                xlab="Expression level [a.u.]", ylab="Mutational Change [a.u.]")+
     scale_x_continuous(breaks = get_breaks(by = 0.5, from = 0),limits =  c(0, 1)) +
+    geom_segment(aes(x = 0.5, xend = 0.5, y = -0.5, yend = 0.3),size=0.5,linetype=2)+
+    geom_hline(yintercept = 0,size=0.5,linetype=2)+
     geom_line(aes(x=expression,y=Runmed),color = my_colorpl_category[i])+
     annotate("text",x=Inf,y=Inf,label=paste("Fb=",intrcpt[i],sep=" "), hjust = 1,vjust = 1,size=7)
   g<-ggpar(g,font.xtickslab = c(18),font.ytickslab = c(18),font.x = c(18),font.y=c(18))
